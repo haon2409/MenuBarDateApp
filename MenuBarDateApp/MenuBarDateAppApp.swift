@@ -11,13 +11,9 @@ struct MenuBarDateApp: App {
                 NSApplication.shared.terminate(nil)
             }
         } label: {
-            HStack(alignment: .center, spacing: 6) {
-                if let icon = viewModel.calendarIcon {
-                    icon
-                }
-
-                Text(viewModel.dateString)
-                    .font(.system(size: 14, weight: .medium))
+            // Chỉ hiển thị 1 Image duy nhất đã gom cả Icon và Text
+            if let icon = viewModel.combinedIcon {
+                icon
             }
         }
     }
@@ -27,14 +23,10 @@ struct MenuBarDateApp: App {
 
 @MainActor
 final class MenuBarViewModel: ObservableObject {
-    @Published var calendarIcon: Image?
-    @Published var dateString: String = ""
+    @Published var combinedIcon: Image?
 
     private var timer: AnyCancellable?
-
-    // Cache để tránh render lại icon khi ngày chưa thay đổi
     private var lastDateString: String = ""
-    private var lastWeekday: String = ""
 
     init() {
         updateDate()
@@ -58,94 +50,73 @@ final class MenuBarViewModel: ObservableObject {
         let date = Date()
         let calendar = Calendar.current
 
-        // MARK: Date
-
+        // MARK: Date & Weekday Setup
         let day = calendar.component(.day, from: date)
-
-        let totalDays =
-            calendar.range(
-                of: .day,
-                in: .month,
-                for: date
-            )?.count ?? 31
-
-        let newDateString = "\(day)/\(totalDays)"
-
-        // MARK: Weekday
-
-        let weekdayIndex = calendar.component(
-            .weekday,
-            from: date
-        )
-
+        let month = calendar.component(.month, from: date)
+        let totalDays = calendar.range(of: .day, in: .month, for: date)?.count ?? 31
+        let weekdayIndex = calendar.component(.weekday, from: date)
         let newWeekday = getVietnameseWeekday(weekdayIndex)
 
-        // Nếu ngày và thứ không thay đổi thì không cần
-        // cập nhật UI hoặc render lại icon.
-        guard newDateString != lastDateString ||
-              newWeekday != lastWeekday else {
-            return
-        }
-
-        // Lưu trạng thái mới
+        // Tạo khóa kiểm tra thay đổi
+        let newDateString = "\(day)/\(month)\(totalDays)-\(newWeekday)"
+        guard newDateString != lastDateString else { return }
         lastDateString = newDateString
-        lastWeekday = newWeekday
 
-        // Cập nhật text
-        dateString = newDateString
+        // MARK: Detect Dark Mode cho Text
+        // Xác định giao diện hệ thống để chỉnh màu chữ thủ công vì ImageRenderer chạy độc lập
+        let isDark = UserDefaults.standard.string(forKey: "AppleInterfaceStyle") == "Dark"
+        let textColor: Color = isDark ? .white : .black
 
-        // MARK: Calendar Icon
+        // MARK: - Gom tất cả vào 1 View
+        let combinedView = HStack(alignment: .center, spacing: 6) {
+            // 1. Icon lịch
+            ZStack {
+                Color.clear
+                CalendarCardView(weekday: newWeekday)
+                    .offset(y: -2)
+            }
+            .frame(width: 24, height: 24)
 
-        // Canvas cao 24pt thay vì 20pt.
-        // Calendar card thực tế vẫn 26 x 20pt.
-        //
-        // offset -2 được áp dụng bên trong ImageRenderer
-        // để dịch chính bitmap của calendar lên 2pt.
-        let iconView = ZStack {
-            Color.clear
-
-            CalendarCardView(weekday: newWeekday)
-                .offset(y: -2)
+            // 2. Text Ngày/Tháng
+            Text("\(day)/\(month)")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(textColor)
+            
+            // 3. Tổng số ngày với khung nền tròn
+            ZStack {
+                Circle()
+                    .fill(Color.black.opacity(0.3)) // Nền tối
+                    .frame(width: 16, height: 16) // Kích thước khung nền tròn
+                
+                Text("\(totalDays)")
+                    .font(.system(size: 14 * 0.7, weight: .bold)) // Giữ nguyên kích thước 0.7
+                    .foregroundColor(.white) // Màu số (nên để trắng hoặc màu nổi trên nền tối)
+            }
+            .offset(x: -4, y: -2)
         }
-        .frame(
-            width: 24,
-            height: 24
-        )
+        .fixedSize()
 
-        let renderer = ImageRenderer(
-            content: iconView
-        )
-
-        renderer.scale =
-            NSScreen.main?.backingScaleFactor ?? 2.0
-
-        renderer.isOpaque = false
+        // MARK: Render thành Image
+        let renderer = ImageRenderer(content: combinedView)
+        renderer.scale = NSScreen.main?.backingScaleFactor ?? 2.0
+        renderer.isOpaque = false // Phải là false để nền trong suốt
 
         if let nsImage = renderer.nsImage {
-            calendarIcon = Image(nsImage: nsImage)
+            // KHÔNG set isTemplate = true để bảo toàn màu đỏ của lịch
+            combinedIcon = Image(nsImage: nsImage)
         }
     }
 
-    private func getVietnameseWeekday(
-        _ index: Int
-    ) -> String {
+    private func getVietnameseWeekday(_ index: Int) -> String {
         switch index {
-        case 1:
-            return "CN"
-        case 2:
-            return "T2"
-        case 3:
-            return "T3"
-        case 4:
-            return "T4"
-        case 5:
-            return "T5"
-        case 6:
-            return "T6"
-        case 7:
-            return "T7"
-        default:
-            return ""
+        case 1: return "CN"
+        case 2: return "T2"
+        case 3: return "T3"
+        case 4: return "T4"
+        case 5: return "T5"
+        case 6: return "T6"
+        case 7: return "T7"
+        default: return ""
         }
     }
 }
@@ -161,49 +132,24 @@ struct CalendarCardView: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            // Nền trắng
             Color.white
 
             VStack(spacing: 0) {
-                // Dải đỏ phía trên
                 Color.red
                     .frame(height: 5)
 
-                // Thứ trong tuần
                 Text(weekday)
-                    .font(
-                        .system(
-                            size: 13,
-                            weight: .semibold
-                        )
-                    )
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(.black)
-                    .frame(
-                        maxWidth: .infinity,
-                        maxHeight: .infinity
-                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .padding(.bottom, 1)
             }
         }
-        .frame(
-            width: cardWidth,
-            height: cardHeight
-        )
-        .clipShape(
-            RoundedRectangle(
-                cornerRadius: cornerRadius,
-                style: .continuous
-            )
-        )
+        .frame(width: cardWidth, height: cardHeight)
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .overlay(
-            RoundedRectangle(
-                cornerRadius: cornerRadius,
-                style: .continuous
-            )
-            .stroke(
-                Color.primary.opacity(0.15),
-                lineWidth: 0.5
-            )
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .stroke(Color.primary.opacity(0.15), lineWidth: 0.5)
         )
     }
 }

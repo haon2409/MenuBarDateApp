@@ -87,7 +87,7 @@ final class MenuBarViewModel: ObservableObject {
                     // Cột 1: Ngày / Tháng
                     VStack(alignment: .trailing, spacing: 3) {
                         Text("\(day)/\(month)")
-                            .font(.system(size: 13, weight: .heavy, design: .rounded))
+                            .font(.system(size: 12, weight: .regular, design: .rounded))
                             .monospacedDigit()
                             .foregroundColor(textColor)
                         

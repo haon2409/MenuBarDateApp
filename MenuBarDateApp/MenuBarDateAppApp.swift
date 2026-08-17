@@ -83,11 +83,11 @@ final class MenuBarViewModel: ObservableObject {
             CalendarCardView(weekday: newWeekday)
             
             // MARK: - Nửa 2: Thông tin chi tiết
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 1) {
                 // Hàng 1: Dương lịch
                 HStack(spacing: 2) { // Giảm spacing xuống 2
                     Text("\(day)/\(month)")
-                        .font(.system(size: 11, weight: .regular, design: .rounded))
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
                         .monospacedDigit()
                         .foregroundColor(textColor)
                         .frame(width: 30, alignment: .leading)
@@ -105,6 +105,7 @@ final class MenuBarViewModel: ObservableObject {
                 Divider()
                     .frame(height: 0.5)
                     .background(textColor.opacity(0.2))
+                    .padding(.vertical, -0.5)
                 
                 // Hàng 2: Âm lịch
                 HStack(spacing: 2) { // Giảm spacing xuống 2

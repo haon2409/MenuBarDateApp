@@ -78,51 +78,54 @@ final class MenuBarViewModel: ObservableObject {
         let textColor: Color = isDark ? .white : .black
 
         // MARK: - Gom tất cả vào 1 View
-            let combinedView = HStack(alignment: .center, spacing: 4) {
-                // Nửa 1: Icon Thứ
-                CalendarCardView(weekday: newWeekday)
+        let combinedView = HStack(alignment: .center, spacing: 6) {
+            // Nửa 1: Icon Thứ
+            CalendarCardView(weekday: newWeekday)
+            
+            // MARK: - Nửa 2: Thông tin chi tiết
+            VStack(alignment: .leading, spacing: 2) {
+                // Hàng 1: Dương lịch
+                HStack(spacing: 2) { // Giảm spacing xuống 2
+                    Text("\(day)/\(month)")
+                        .font(.system(size: 11, weight: .regular, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundColor(textColor)
+                        .frame(width: 30, alignment: .leading)
+                    
+                    Text("\(totalDays)")
+                        .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        .foregroundColor(isDark ? .white : .black)
+                        .frame(width: 16, alignment: .center)
+                        .padding(.vertical, 1)
+                        .background(Color.blue.opacity(0.2))
+                        .clipShape(RoundedRectangle(cornerRadius: 2))
+                }
                 
-                // Nửa 2: Thông tin chi tiết
-                HStack(alignment: .center, spacing: 2) {
-                    // Cột 1: Ngày / Tháng
-                    VStack(alignment: .trailing, spacing: 3) {
-                        Text("\(day)/\(month)")
-                            .font(.system(size: 12, weight: .regular, design: .rounded))
-                            .monospacedDigit()
-                            .foregroundColor(textColor)
-                        
-                        Text("\(lunar.day)/\(lunar.month)")
-                            .font(.system(size: 10, weight: .semibold, design: .rounded))
-                            .monospacedDigit()
-                            .foregroundColor(textColor.opacity(0.6))
-                    }
+                // Đường kẻ ngang
+                Divider()
+                    .frame(height: 0.5)
+                    .background(textColor.opacity(0.2))
+                
+                // Hàng 2: Âm lịch
+                HStack(spacing: 2) { // Giảm spacing xuống 2
+                    Text("\(lunar.day)/\(lunar.month)")
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundColor(textColor.opacity(0.7))
+                        .frame(width: 30, alignment: .leading)
                     
-                    // Cột 2: Đường phân cách
-                    Divider()
-                        .frame(width: 1, height: 22)
-                        .background(textColor.opacity(0.15))
-                    
-                    // Cột 3: Tổng số ngày (Dạng Badge)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("\(totalDays)")
-                            .font(.system(size: 9, weight: .bold, design: .monospaced))
-                            .foregroundColor(isDark ? .white : .black)
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 1)
-                            .background(Color.blue.opacity(0.2)) // Màu nhấn Dương lịch
-                            .clipShape(RoundedRectangle(cornerRadius: 3))
-                        
-                        Text("\(lunarTotalDays)")
-                            .font(.system(size: 8, weight: .bold, design: .monospaced))
-                            .foregroundColor(textColor.opacity(0.7))
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 1)
-                            .background(Color.gray.opacity(0.2)) // Màu nhấn Âm lịch
-                            .clipShape(RoundedRectangle(cornerRadius: 3))
-                    }
+                    Text("\(lunarTotalDays)")
+                        .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        .foregroundColor(textColor.opacity(0.6))
+                        .frame(width: 16, alignment: .center)
+                        .padding(.vertical, 1)
+                        .background(Color.gray.opacity(0.2))
+                        .clipShape(RoundedRectangle(cornerRadius: 2))
                 }
             }
-            .fixedSize()
+            .frame(width: 48) // Thu nhỏ tổng chiều rộng tương ứng để ép sát hơn
+        }
+        .fixedSize()
 
         // MARK: Render thành Image
         let renderer = ImageRenderer(content: combinedView)

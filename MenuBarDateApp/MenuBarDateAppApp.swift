@@ -50,59 +50,86 @@ final class MenuBarViewModel: ObservableObject {
         let date = Date()
         let calendar = Calendar.current
 
-        // MARK: Date & Weekday Setup
         let day = calendar.component(.day, from: date)
         let month = calendar.component(.month, from: date)
+        let year = calendar.component(.year, from: date)
         let totalDays = calendar.range(of: .day, in: .month, for: date)?.count ?? 31
         let weekdayIndex = calendar.component(.weekday, from: date)
         let newWeekday = getVietnameseWeekday(weekdayIndex)
 
+        // Lấy ngày Âm lịch
+        let lunar = LunarEngine.getLunarDate(dd: day, mm: month, yyyy: year)
+        
+        // Tính tổng số ngày trong tháng Âm lịch hiện tại
+        let daysToAdd = 30 - lunar.day
+        let futureDate = calendar.date(byAdding: .day, value: daysToAdd, to: date) ?? date
+        let futureDay = calendar.component(.day, from: futureDate)
+        let futureMonth = calendar.component(.month, from: futureDate)
+        let futureYear = calendar.component(.year, from: futureDate)
+        let futureLunar = LunarEngine.getLunarDate(dd: futureDay, mm: futureMonth, yyyy: futureYear)
+        let lunarTotalDays = (futureLunar.day == 30) ? 30 : 29
+
         // Tạo khóa kiểm tra thay đổi
-        let newDateString = "\(day)/\(month)\(totalDays)-\(newWeekday)"
+        let newDateString = "\(day)/\(month)(\(totalDays))-\(newWeekday)-\(lunar.day)/\(lunar.month)(\(lunarTotalDays))"
         guard newDateString != lastDateString else { return }
         lastDateString = newDateString
 
-        // MARK: Detect Dark Mode cho Text
-        // Xác định giao diện hệ thống để chỉnh màu chữ thủ công vì ImageRenderer chạy độc lập
         let isDark = UserDefaults.standard.string(forKey: "AppleInterfaceStyle") == "Dark"
         let textColor: Color = isDark ? .white : .black
 
         // MARK: - Gom tất cả vào 1 View
-        let combinedView = HStack(alignment: .center, spacing: 6) {
-            // 1. Icon lịch
-            ZStack {
-                Color.clear
+            let combinedView = HStack(alignment: .center, spacing: 4) {
+                // Nửa 1: Icon Thứ
                 CalendarCardView(weekday: newWeekday)
-                    .offset(y: -2)
-            }
-            .frame(width: 24, height: 24)
-
-            // 2. Text Ngày/Tháng
-            Text("\(day)/\(month)")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundColor(textColor)
-            
-            // 3. Tổng số ngày với khung nền tròn
-            ZStack {
-                Circle()
-                    .fill(Color.black.opacity(0.3)) // Nền tối
-                    .frame(width: 16, height: 16) // Kích thước khung nền tròn
                 
-                Text("\(totalDays)")
-                    .font(.system(size: 14 * 0.7, weight: .bold)) // Giữ nguyên kích thước 0.7
-                    .foregroundColor(.white) // Màu số (nên để trắng hoặc màu nổi trên nền tối)
+                // Nửa 2: Thông tin chi tiết
+                HStack(alignment: .center, spacing: 2) {
+                    // Cột 1: Ngày / Tháng
+                    VStack(alignment: .trailing, spacing: 3) {
+                        Text("\(day)/\(month)")
+                            .font(.system(size: 13, weight: .heavy, design: .rounded))
+                            .monospacedDigit()
+                            .foregroundColor(textColor)
+                        
+                        Text("\(lunar.day)/\(lunar.month)")
+                            .font(.system(size: 10, weight: .semibold, design: .rounded))
+                            .monospacedDigit()
+                            .foregroundColor(textColor.opacity(0.6))
+                    }
+                    
+                    // Cột 2: Đường phân cách
+                    Divider()
+                        .frame(width: 1, height: 22)
+                        .background(textColor.opacity(0.15))
+                    
+                    // Cột 3: Tổng số ngày (Dạng Badge)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("\(totalDays)")
+                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                            .foregroundColor(isDark ? .white : .black)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Color.blue.opacity(0.2)) // Màu nhấn Dương lịch
+                            .clipShape(RoundedRectangle(cornerRadius: 3))
+                        
+                        Text("\(lunarTotalDays)")
+                            .font(.system(size: 8, weight: .bold, design: .monospaced))
+                            .foregroundColor(textColor.opacity(0.7))
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Color.gray.opacity(0.2)) // Màu nhấn Âm lịch
+                            .clipShape(RoundedRectangle(cornerRadius: 3))
+                    }
+                }
             }
-            .offset(x: -4, y: -2)
-        }
-        .fixedSize()
+            .fixedSize()
 
         // MARK: Render thành Image
         let renderer = ImageRenderer(content: combinedView)
         renderer.scale = NSScreen.main?.backingScaleFactor ?? 2.0
-        renderer.isOpaque = false // Phải là false để nền trong suốt
+        renderer.isOpaque = false
 
         if let nsImage = renderer.nsImage {
-            // KHÔNG set isTemplate = true để bảo toàn màu đỏ của lịch
             combinedIcon = Image(nsImage: nsImage)
         }
     }

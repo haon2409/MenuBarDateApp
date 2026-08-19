@@ -537,4 +537,95 @@ final class CalendarPopupViewModel: ObservableObject {
             await fetchDataFromGoogle() // Rollback dữ liệu nếu lỗi
         }
     }
+    
+    // MARK: - Gửi Request Thêm Mới (POST)
+    func submitAddItem() async {
+        print("🔄 [DEBUG ADD] Bắt đầu gọi hàm submitAddItem()")
+        
+        guard let token = await auth.refreshAccessTokenIfNeeded() else {
+            print("❌ [DEBUG ADD] Thất bại: Không lấy được Access Token")
+            return
+        }
+        
+        let isTask = isTaskMode
+        let newTitle = modalTitle.isEmpty ? "(Không có tiêu đề)" : modalTitle
+        let newDesc = modalDesc
+        let targetDate = selectedDateStr // format "yyyy-MM-dd"
+        
+        // 1. Đóng modal ngay lập tức để UX mượt (Optimistic UI part 1)
+        await MainActor.run {
+            self.showAddModal = false
+        }
+        
+        // 2. Cấu hình URL cho API POST
+        let urlString = isTask
+            ? "https://tasks.googleapis.com/tasks/v1/lists/@default/tasks"
+            : "https://www.googleapis.com/calendar/v3/calendars/primary/events"
+        
+        guard let url = URL(string: urlString) else { return }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        // 3. Chuẩn bị Body JSON dựa trên loại
+        var body: [String: Any] = [:]
+        if isTask {
+            body = [
+                "title": newTitle,
+                "notes": newDesc,
+                "due": "\(targetDate)T00:00:00.000Z"
+            ]
+        } else {
+            body = [
+                "summary": newTitle,
+                "description": newDesc,
+                "start": ["date": targetDate],
+                "end": ["date": targetDate]
+            ]
+        }
+        
+        print("📦 [DEBUG ADD] Body: \(body)")
+        
+        do {
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+            let (data, response) = try await URLSession.shared.data(for: request)
+            
+            if let httpResponse = response as? HTTPURLResponse {
+                print("📡 [DEBUG ADD] HTTP Status Code: \(httpResponse.statusCode)")
+                
+                if (200...299).contains(httpResponse.statusCode) {
+                    // 4. Lấy ID từ server và cập nhật UI nội bộ
+                    if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                       let newItemId = json["id"] as? String {
+                        
+                        let newItem = CalendarItem(
+                            id: newItemId,
+                            title: newTitle,
+                            description: newDesc.isEmpty ? nil : newDesc,
+                            type: isTask ? .task : .event,
+                            isCompleted: false,
+                            dateString: targetDate
+                        )
+                        
+                        await MainActor.run {
+                            if let dayIndex = days.firstIndex(where: { $0.dateString == targetDate }) {
+                                days[dayIndex].items.append(newItem)
+                                print("✅ [DEBUG ADD] Thêm thành công vào UI: \(newItem.title)")
+                            }
+                        }
+                    }
+                } else {
+                    if let errorString = String(data: data, encoding: .utf8) {
+                        print("❌ [DEBUG ADD] Lỗi từ API Google: \n\(errorString)")
+                    }
+                    await fetchDataFromGoogle() // Tải lại đồng bộ nếu có lỗi
+                }
+            }
+        } catch {
+            print("❌ [DEBUG ADD] Lỗi kết nối:", error.localizedDescription)
+            await fetchDataFromGoogle() // Tải lại đồng bộ nếu có lỗi
+        }
+    }
 }

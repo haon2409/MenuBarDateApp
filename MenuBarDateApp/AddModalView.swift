@@ -6,7 +6,7 @@ struct AddModalView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             
-            // 1. Chỉnh sửa linh hoạt Tiêu đề (Thêm / Sửa)
+            // 1. Tiêu đề động cho Thêm/Sửa
             let modeText = viewModel.isEditMode ? "Sửa" : "Thêm"
             let typeText = viewModel.isTaskMode ? "Công việc" : "Sự kiện"
             let dateText = viewModel.selectedDateStr.isEmpty ? "" : " (\(viewModel.selectedDateStr))"
@@ -41,15 +41,13 @@ struct AddModalView: View {
                 .foregroundColor(.white)
                 .cornerRadius(4)
                 
-                // 2. Cập nhật Logic Lưu ở nút OK
                 Button("OK") {
                     Task {
+                        // 2. Phân nhánh logic Thêm / Sửa
                         if viewModel.isEditMode {
                             await viewModel.submitEditItem()
                         } else {
-                            // TODO: Gọi hàm submitAddItem() nếu bạn đã viết hàm thêm mới
-                            // Tạm thời nếu chưa có hàm Thêm, cứ đóng modal
-                            viewModel.showAddModal = false
+                            await viewModel.submitAddItem()
                         }
                     }
                 }

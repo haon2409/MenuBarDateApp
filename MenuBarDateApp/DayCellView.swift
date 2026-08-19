@@ -91,6 +91,7 @@ struct ItemView: View {
         .cornerRadius(2)
         .strikethrough(item.isCompleted)
         .opacity(item.isCompleted ? 0.7 : 1.0)
+        .help(item.description?.isEmpty == false ? "\(item.title)\n\(item.description!)" : item.title)
         // MARK: - Context Menu 1 & 2: Click trực tiếp vào Task hoặc Event
         .contextMenu {
             if item.type == .task {

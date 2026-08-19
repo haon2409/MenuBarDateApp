@@ -108,12 +108,17 @@ final class GoogleAuthManager: NSObject, ObservableObject {
     }
     
     // MARK: - Refresh Token
-    func refreshAccessTokenIfNeeded() async -> String? {
-        if let token = accessToken { return token }
+
+    func refreshAccessTokenIfNeeded(forceRefresh: Bool = false) async -> String? {
+        // Nếu không yêu cầu forceRefresh và đã có accessToken thì mới dùng lại
+        if !forceRefresh, let token = accessToken {
+            return token
+        }
         
         guard let refreshData = KeychainHelper.load(key: "refresh_token"),
               let refreshToken = String(data: refreshData, encoding: .utf8) else {
             isLoggedIn = false
+            accessToken = nil
             return nil
         }
         
@@ -139,6 +144,9 @@ final class GoogleAuthManager: NSObject, ObservableObject {
                     _ = KeychainHelper.save(key: "access_token", data: d)
                 }
                 return access
+            } else {
+                // Refresh token hết hạn hoặc không hợp lệ -> Đăng xuất
+                logout()
             }
         } catch {
             print("Refresh error:", error)

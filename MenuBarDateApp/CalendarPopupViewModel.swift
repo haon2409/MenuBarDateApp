@@ -170,11 +170,12 @@ final class CalendarPopupViewModel: ObservableObject {
     }
     
     // MARK: - Fetch Google Data
-    func fetchDataFromGoogle() async {
+    func fetchDataFromGoogle(isRetry: Bool = false) async {
         print("🔄 [Debug] Bắt đầu fetchDataFromGoogle...")
         
-        guard let token = await auth.refreshAccessTokenIfNeeded() else {
-            print("❌ [Debug] Lỗi: Không thể lấy hoặc refresh access token (token trả về nil).")
+        // Nếu là lần thử lại (isRetry = true), ép buộc gọi API refresh token mới
+        guard let token = await auth.refreshAccessTokenIfNeeded(forceRefresh: isRetry) else {
+            print("❌ [Debug] Lỗi: Không thể lấy hoặc refresh access token.")
             return
         }
         
@@ -185,8 +186,15 @@ final class CalendarPopupViewModel: ObservableObject {
             days[i].items.removeAll()
         }
         
-        await fetchCalendarEvents(token: token)
-        await fetchTasks(token: token)
+        let eventsSuccess = await fetchCalendarEvents(token: token)
+        let tasksSuccess = await fetchTasks(token: token)
+        
+        // Nếu gặp lỗi 401 và chưa thử lại -> Thực hiện force refresh token 1 lần
+        if (!eventsSuccess || !tasksSuccess) && !isRetry {
+            print("⚠️ [Debug] Token hết hạn (Lỗi 401), đang tiến hành làm mới token...")
+            await fetchDataFromGoogle(isRetry: true)
+            return
+        }
         
         print("✅ [Debug] Fetch xong hoàn tất. Tổng số item trên lịch:", days.flatMap { $0.items }.count)
     }
@@ -198,11 +206,8 @@ final class CalendarPopupViewModel: ObservableObject {
         return (first, last)
     }
     
-    private func fetchCalendarEvents(token: String) async {
-        guard let range = visibleDateRange else {
-            print("⚠️ [Debug] Calendar: Không xác định được khoảng ngày hiển thị (visibleDateRange nil).")
-            return
-        }
+    private func fetchCalendarEvents(token: String) async -> Bool {
+        guard let range = visibleDateRange else { return true }
         
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
@@ -224,24 +229,16 @@ final class CalendarPopupViewModel: ObservableObject {
         
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
-            
             if let httpResponse = response as? HTTPURLResponse {
                 print("📅 [Debug] Calendar API Status Code: \(httpResponse.statusCode)")
-                if httpResponse.statusCode != 200 {
-                    let responseString = String(data: data, encoding: .utf8) ?? "Không đọc được body"
-                    print("❌ [Debug] Calendar API lỗi phản hồi: \(responseString)")
-                    return
-                }
+                if httpResponse.statusCode == 401 { return false } // Trả về false nếu dính 401
+                if httpResponse.statusCode != 200 { return true }
             }
             
             if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                let items = json["items"] as? [[String: Any]] {
-                
-                print("📅 [Debug] Nhận được \(items.count) events từ Google.")
-                
                 for item in items {
                     guard let summary = item["summary"] as? String else { continue }
-                    
                     let dateStr: String
                     if let startDict = item["start"] as? [String: Any] {
                         if let dateTime = startDict["dateTime"] as? String {
@@ -258,7 +255,6 @@ final class CalendarPopupViewModel: ObservableObject {
                         type: .event,
                         dateString: dateStr
                     )
-                    
                     if let index = days.firstIndex(where: { $0.dateString == dateStr }) {
                         days[index].items.append(calendarItem)
                     }
@@ -267,13 +263,11 @@ final class CalendarPopupViewModel: ObservableObject {
         } catch {
             print("❌ [Debug] Calendar fetch exception error:", error)
         }
+        return true
     }
 
-    private func fetchTasks(token: String) async {
-        guard let range = visibleDateRange else {
-            print("⚠️ [Debug] Tasks: Không xác định được khoảng ngày hiển thị (visibleDateRange nil).")
-            return
-        }
+    private func fetchTasks(token: String) async -> Bool {
+        guard let range = visibleDateRange else { return true }
         
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
@@ -296,28 +290,18 @@ final class CalendarPopupViewModel: ObservableObject {
         
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
-            
             if let httpResponse = response as? HTTPURLResponse {
                 print("✅ [Debug] Tasks API Status Code: \(httpResponse.statusCode)")
-                if httpResponse.statusCode != 200 {
-                    let responseString = String(data: data, encoding: .utf8) ?? "Không đọc được body"
-                    print("❌ [Debug] Tasks API lỗi phản hồi: \(responseString)")
-                    return
-                }
+                if httpResponse.statusCode == 401 { return false } // Trả về false nếu dính 401
+                if httpResponse.statusCode != 200 { return true }
             }
             
             if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                let tasks = json["items"] as? [[String: Any]] {
-                
-                print("✅ [Debug] Nhận được \(tasks.count) tasks từ Google.")
-                var addedCount = 0
-                
                 for task in tasks {
                     guard let title = task["title"] as? String,
                           let due = task["due"] as? String else { continue }
-                    
                     let dateStr = String(due.prefix(10))
-                    
                     if let index = days.firstIndex(where: { $0.dateString == dateStr }) {
                         let calendarItem = CalendarItem(
                             id: task["id"] as? String ?? UUID().uuidString,
@@ -328,16 +312,13 @@ final class CalendarPopupViewModel: ObservableObject {
                             dateString: dateStr
                         )
                         days[index].items.append(calendarItem)
-                        addedCount += 1
                     }
                 }
-                print("✅ [Debug] Đã thêm thành công \(addedCount) tasks vào lưới lịch.")
-            } else {
-                print("⚠️ [Debug] Tasks JSON không có key 'items' hoặc rỗng.")
             }
         } catch {
             print("❌ [Debug] Tasks fetch exception error:", error)
         }
+        return true
     }
     
     // MARK: - Popup height

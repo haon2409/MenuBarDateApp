@@ -365,4 +365,75 @@ final class CalendarPopupViewModel: ObservableObject {
             print("❌ Lỗi khi xóa: \(error)")
         }
     }
+
+    func toggleTaskStatus(_ item: CalendarItem) async {
+        guard item.type == .task else { return }
+        
+        // 1. Optimistic UI: Đổi trạng thái hiển thị ngay lập tức
+        await MainActor.run {
+            if let dayIndex = days.firstIndex(where: { $0.dateString == item.dateString }),
+               let itemIndex = days[dayIndex].items.firstIndex(where: { $0.id == item.id }) {
+                days[dayIndex].items[itemIndex].isCompleted.toggle()
+            }
+        }
+        
+        // 2. Lấy Access Token
+        guard let token = await auth.refreshAccessTokenIfNeeded() else {
+            await rollbackStatus(item)
+            return
+        }
+        
+        // 3. Chuẩn bị Request PATCH tới Google Tasks API
+        let newStatus = !item.isCompleted ? "completed" : "needsAction"
+        let urlString = "https://www.googleapis.com/tasks/v1/lists/@default/tasks/\(item.id)"
+        guard let url = URL(string: urlString) else { return }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "PATCH"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        var body: [String: Any] = ["status": newStatus]
+        if newStatus == "completed" {
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime]
+            body["completed"] = formatter.string(from: Date())
+        } else {
+            body["completed"] = NSNull()
+        }
+        
+        do {
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+            let (_, response) = try await URLSession.shared.data(for: request)
+            
+            if let httpResponse = response as? HTTPURLResponse {
+                if httpResponse.statusCode == 401 {
+                    // Thử lại với token mới nếu token cũ hết hạn
+                    if let newToken = await auth.refreshAccessTokenIfNeeded(forceRefresh: true) {
+                        request.setValue("Bearer \(newToken)", forHTTPHeaderField: "Authorization")
+                        let (_, retryResponse) = try await URLSession.shared.data(for: request)
+                        if let retryHttp = retryResponse as? HTTPURLResponse, !(200...299).contains(retryHttp.statusCode) {
+                            await rollbackStatus(item)
+                        }
+                    } else {
+                        await rollbackStatus(item)
+                    }
+                } else if !(200...299).contains(httpResponse.statusCode) {
+                    await rollbackStatus(item)
+                }
+            }
+        } catch {
+            print("❌ [Debug] Lỗi đổi trạng thái task:", error)
+            await rollbackStatus(item)
+        }
+    }
+
+    private func rollbackStatus(_ item: CalendarItem) async {
+        await MainActor.run {
+            if let dayIndex = days.firstIndex(where: { $0.dateString == item.dateString }),
+               let itemIndex = days[dayIndex].items.firstIndex(where: { $0.id == item.id }) {
+                days[dayIndex].items[itemIndex].isCompleted.toggle()
+            }
+        }
+    }
 }

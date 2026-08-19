@@ -102,7 +102,9 @@ struct ItemView: View {
                 }
                 
                 Button {
-                    // todo: Đổi trạng thái Complete/Incomplete
+                    Task {
+                        await viewModel.toggleTaskStatus(item)
+                    }
                 } label: {
                     Text(item.isCompleted ? "Incomplete" : "Complete")
                 }

@@ -23,6 +23,14 @@ final class CalendarPopupViewModel: ObservableObject {
         
         // Đồng bộ trạng thái login
         isLoggedIn = auth.isLoggedIn
+    }
+    
+    func onPopupAppear() {
+        // Reset về tháng hiện tại
+        currentDate = Date()
+        generateCalendarGrid()
+        
+        // Chỉ fetch khi thực sự cần thiết (khi mở popup)
         if isLoggedIn {
             Task {
                 await fetchDataFromGoogle()
@@ -163,14 +171,14 @@ final class CalendarPopupViewModel: ObservableObject {
     
     // MARK: - Fetch Google Data
     func fetchDataFromGoogle() async {
-        print("🔄 Bắt đầu fetchDataFromGoogle...")
+        print("🔄 [Debug] Bắt đầu fetchDataFromGoogle...")
         
         guard let token = await auth.refreshAccessTokenIfNeeded() else {
-            print("❌ Không lấy được token")
+            print("❌ [Debug] Lỗi: Không thể lấy hoặc refresh access token (token trả về nil).")
             return
         }
         
-        print("✅ Có token, bắt đầu fetch...")
+        print("✅ [Debug] Đã lấy được access token thành công. Độ dài token: \(token.count)")
         
         // Clear items cũ
         for i in days.indices {
@@ -180,7 +188,7 @@ final class CalendarPopupViewModel: ObservableObject {
         await fetchCalendarEvents(token: token)
         await fetchTasks(token: token)
         
-        print("✅ Fetch xong. Tổng số item:", days.flatMap { $0.items }.count)
+        print("✅ [Debug] Fetch xong hoàn tất. Tổng số item trên lịch:", days.flatMap { $0.items }.count)
     }
     
     // Thêm hàm helper này vào ViewModel
@@ -191,13 +199,15 @@ final class CalendarPopupViewModel: ObservableObject {
     }
     
     private func fetchCalendarEvents(token: String) async {
-        guard let range = visibleDateRange else { return }
+        guard let range = visibleDateRange else {
+            print("⚠️ [Debug] Calendar: Không xác định được khoảng ngày hiển thị (visibleDateRange nil).")
+            return
+        }
         
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
         
-        // Mở rộng thêm 1 ngày cuối để an toàn
         let timeMax = calendar.date(byAdding: .day, value: 1, to: range.end)!
         
         var components = URLComponents(string: "https://www.googleapis.com/calendar/v3/calendars/primary/events")!
@@ -213,12 +223,21 @@ final class CalendarPopupViewModel: ObservableObject {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         
         do {
-            let (data, _) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await URLSession.shared.data(for: request)
+            
+            if let httpResponse = response as? HTTPURLResponse {
+                print("📅 [Debug] Calendar API Status Code: \(httpResponse.statusCode)")
+                if httpResponse.statusCode != 200 {
+                    let responseString = String(data: data, encoding: .utf8) ?? "Không đọc được body"
+                    print("❌ [Debug] Calendar API lỗi phản hồi: \(responseString)")
+                    return
+                }
+            }
             
             if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                let items = json["items"] as? [[String: Any]] {
                 
-                print("📅 Nhận được \(items.count) events trong khoảng \(days.first?.dateString ?? "") → \(days.last?.dateString ?? "")")
+                print("📅 [Debug] Nhận được \(items.count) events từ Google.")
                 
                 for item in items {
                     guard let summary = item["summary"] as? String else { continue }
@@ -246,12 +265,15 @@ final class CalendarPopupViewModel: ObservableObject {
                 }
             }
         } catch {
-            print("Calendar fetch error:", error)
+            print("❌ [Debug] Calendar fetch exception error:", error)
         }
     }
-    
+
     private func fetchTasks(token: String) async {
-        guard let range = visibleDateRange else { return }
+        guard let range = visibleDateRange else {
+            print("⚠️ [Debug] Tasks: Không xác định được khoảng ngày hiển thị (visibleDateRange nil).")
+            return
+        }
         
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
@@ -260,7 +282,6 @@ final class CalendarPopupViewModel: ObservableObject {
         let dueMin = formatter.string(from: range.start)
         let dueMax = formatter.string(from: calendar.date(byAdding: .day, value: 1, to: range.end)!)
         
-        // Dùng @default giống extension
         var components = URLComponents(string: "https://tasks.googleapis.com/tasks/v1/lists/@default/tasks")!
         components.queryItems = [
             .init(name: "dueMin", value: dueMin),
@@ -274,13 +295,21 @@ final class CalendarPopupViewModel: ObservableObject {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         
         do {
-            let (data, _) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await URLSession.shared.data(for: request)
+            
+            if let httpResponse = response as? HTTPURLResponse {
+                print("✅ [Debug] Tasks API Status Code: \(httpResponse.statusCode)")
+                if httpResponse.statusCode != 200 {
+                    let responseString = String(data: data, encoding: .utf8) ?? "Không đọc được body"
+                    print("❌ [Debug] Tasks API lỗi phản hồi: \(responseString)")
+                    return
+                }
+            }
             
             if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                let tasks = json["items"] as? [[String: Any]] {
                 
-                print("✅ Nhận được \(tasks.count) tasks (dùng @default + dueMin/dueMax)")
-                
+                print("✅ [Debug] Nhận được \(tasks.count) tasks từ Google.")
                 var addedCount = 0
                 
                 for task in tasks {
@@ -302,11 +331,12 @@ final class CalendarPopupViewModel: ObservableObject {
                         addedCount += 1
                     }
                 }
-                
-                print("✅ Đã thêm \(addedCount) tasks vào lịch")
+                print("✅ [Debug] Đã thêm thành công \(addedCount) tasks vào lưới lịch.")
+            } else {
+                print("⚠️ [Debug] Tasks JSON không có key 'items' hoặc rỗng.")
             }
         } catch {
-            print("Tasks fetch error:", error)
+            print("❌ [Debug] Tasks fetch exception error:", error)
         }
     }
     

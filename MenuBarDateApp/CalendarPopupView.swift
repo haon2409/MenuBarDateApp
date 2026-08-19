@@ -79,6 +79,10 @@ struct CalendarPopupView: View {
             }
         }
         .frame(width: 770, height: viewModel.popupHeight) // Co giãn chiều cao động theo viewModel
+        .onAppear {
+                    // Sự kiện này xảy ra mỗi khi Popup được mở
+                    viewModel.onPopupAppear()
+                }
     }
     
     private func navButton(icon: String, action: @escaping () -> Void) -> some View {

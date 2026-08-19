@@ -42,20 +42,16 @@ struct DayCellView: View {
             RoundedRectangle(cornerRadius: 4)
                 .stroke(Color(hex: "#3b3e43"), lineWidth: 1)
         )
-        // MARK: - Context Menu
+        // MARK: - Context Menu 3: Vùng trống trong ô ngày
         .contextMenu {
             Button {
-                viewModel.selectedDateStr = day.dateString
-                viewModel.isTaskMode = true
-                viewModel.showAddModal = true
+                // todo: Thêm công việc
             } label: {
                 Text("+ Task")
             }
             
             Button {
-                viewModel.selectedDateStr = day.dateString
-                viewModel.isTaskMode = false
-                viewModel.showAddModal = true
+                // todo: Thêm sự kiện
             } label: {
                 Text("+ Event")
             }
@@ -76,7 +72,6 @@ struct ItemView: View {
             
             Spacer()
             
-            // Nút xóa được bọc trong Button để gọi hàm
             Button(action: {
                 Task {
                     await viewModel.deleteItem(item)
@@ -96,5 +91,29 @@ struct ItemView: View {
         .cornerRadius(2)
         .strikethrough(item.isCompleted)
         .opacity(item.isCompleted ? 0.7 : 1.0)
+        // MARK: - Context Menu 1 & 2: Click trực tiếp vào Task hoặc Event
+        .contextMenu {
+            if item.type == .task {
+                // Context Menu 1: Click chuột phải vào Task
+                Button {
+                    // todo: Chỉnh sửa Task
+                } label: {
+                    Text("Edit")
+                }
+                
+                Button {
+                    // todo: Đổi trạng thái Complete/Incomplete
+                } label: {
+                    Text(item.isCompleted ? "Incomplete" : "Complete")
+                }
+            } else {
+                // Context Menu 2: Click chuột phải vào Event
+                Button {
+                    // todo: Chỉnh sửa Event
+                } label: {
+                    Text("Edit")
+                }
+            }
+        }
     }
 }

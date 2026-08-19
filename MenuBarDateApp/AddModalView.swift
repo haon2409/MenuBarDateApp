@@ -6,7 +6,7 @@ struct AddModalView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             
-            // 1. Tiêu đề động cho Thêm/Sửa
+            // 1. Tiêu đề động
             let modeText = viewModel.isEditMode ? "Sửa" : "Thêm"
             let typeText = viewModel.isTaskMode ? "Công việc" : "Sự kiện"
             let dateText = viewModel.selectedDateStr.isEmpty ? "" : " (\(viewModel.selectedDateStr))"
@@ -31,6 +31,62 @@ struct AddModalView: View {
                 .cornerRadius(4)
                 .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(hex: "#4a4d53"), lineWidth: 1))
             
+            // 2. Tùy chọn Lặp lại (Chỉ hiển thị khi thêm Task mới)
+            if viewModel.isTaskMode && !viewModel.isEditMode {
+                Button(action: {
+                    viewModel.isRepeat.toggle()
+                }) {
+                    HStack {
+                        Image(systemName: viewModel.isRepeat ? "checkmark.square.fill" : "square")
+                            .foregroundColor(viewModel.isRepeat ? Color(hex: "#1bb5d6") : .gray)
+                        Text("Lặp lại công việc này")
+                            .font(.system(size: 12))
+                            .foregroundColor(.white)
+                    }
+                }
+                .buttonStyle(PlainButtonStyle())
+                
+                if viewModel.isRepeat {
+                    HStack(spacing: 4) {
+                        Text("Mỗi:")
+                            .font(.system(size: 11))
+                            .foregroundColor(.white)
+                        
+                        Picker("", selection: $viewModel.repeatInterval) {
+                            ForEach(1...30, id: \.self) { i in
+                                Text("\(i)").tag(i)
+                            }
+                        }
+                        .frame(width: 45)
+                        .clipped()
+                        
+                        Picker("", selection: $viewModel.repeatUnit) {
+                            Text("Ngày").tag("days")
+                            Text("Tuần").tag("weeks")
+                            Text("Tháng").tag("months")
+                            Text("Năm").tag("years")
+                        }
+                        .frame(width: 75)
+                        .clipped()
+                        
+                        Text("- Số lần:")
+                            .font(.system(size: 11))
+                            .foregroundColor(.white)
+                        
+                        TextField("3", text: $viewModel.repeatTimes)
+                            .textFieldStyle(PlainTextFieldStyle())
+                            .font(.system(size: 11))
+                            .multilineTextAlignment(.center)
+                            .frame(width: 30)
+                            .padding(.vertical, 4)
+                            .background(Color(hex: "#202124"))
+                            .foregroundColor(.white)
+                            .cornerRadius(4)
+                    }
+                    .padding(.bottom, 4)
+                }
+            }
+            
             HStack(spacing: 8) {
                 Spacer()
                 Button("Cancel") {
@@ -43,7 +99,6 @@ struct AddModalView: View {
                 
                 Button("OK") {
                     Task {
-                        // 2. Phân nhánh logic Thêm / Sửa
                         if viewModel.isEditMode {
                             await viewModel.submitEditItem()
                         } else {

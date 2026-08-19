@@ -28,13 +28,13 @@ struct DayCellView: View {
             ScrollView {
                 VStack(spacing: 1) {
                     ForEach(day.items) { item in
-                        ItemView(item: item)
+                        ItemView(item: item, viewModel: viewModel)
                     }
                 }
             }
             Spacer()
         }
-        .frame(height: 75) // min-height: 68px, max-height: 75px
+        .frame(height: 75)
         .background(day.isCurrentMonth ? Color(hex: "#2c2f34") : Color(hex: "#222428"))
         .opacity(day.isCurrentMonth ? 1.0 : 0.45)
         .cornerRadius(4)
@@ -65,16 +65,29 @@ struct DayCellView: View {
 
 struct ItemView: View {
     let item: CalendarItem
+    @ObservedObject var viewModel: CalendarPopupViewModel
+    
     var body: some View {
         HStack {
             Text(item.title)
                 .font(.system(size: 11))
                 .lineLimit(1)
                 .truncationMode(.tail)
+            
             Spacer()
-            Text("×")
-                .font(.system(size: 11, weight: .bold))
-                .opacity(0.6)
+            
+            // Nút xóa được bọc trong Button để gọi hàm
+            Button(action: {
+                Task {
+                    await viewModel.deleteItem(item)
+                }
+            }) {
+                Text("×")
+                    .font(.system(size: 11, weight: .bold))
+            }
+            .buttonStyle(PlainButtonStyle())
+            .foregroundColor(item.type == .event ? .black : .white)
+            .opacity(0.7)
         }
         .padding(.horizontal, 3)
         .padding(.vertical, 1)

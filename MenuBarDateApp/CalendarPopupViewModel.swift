@@ -352,4 +352,36 @@ final class CalendarPopupViewModel: ObservableObject {
         let padding: CGFloat = 24
         return headerHeight + (CGFloat(totalRows) * cellHeight) + padding
     }
+    
+    func deleteItem(_ item: CalendarItem) async {
+        // 1. Lấy token mới nhất
+        guard let token = await auth.refreshAccessTokenIfNeeded() else { return }
+        
+        // 2. Xác định URL
+        let urlString = item.type == .event
+            ? "https://www.googleapis.com/calendar/v3/calendars/primary/events/\(item.id)"
+            : "https://tasks.googleapis.com/tasks/v1/lists/@default/tasks/\(item.id)"
+        
+        guard let url = URL(string: urlString) else { return }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        
+        // 3. Thực hiện request
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            if let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) {
+                
+                // 4. Cập nhật UI (Xóa item khỏi danh sách)
+                await MainActor.run {
+                    if let dayIndex = days.firstIndex(where: { $0.dateString == item.dateString }) {
+                        days[dayIndex].items.removeAll(where: { $0.id == item.id })
+                    }
+                }
+            }
+        } catch {
+            print("❌ Lỗi khi xóa: \(error)")
+        }
+    }
 }

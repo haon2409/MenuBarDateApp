@@ -27,7 +27,9 @@ struct CalendarPopupView: View {
                     Spacer()
                     
                     HStack(spacing: 8) {
-                        Button(action: viewModel.login) {
+                        Button(action: {
+                            viewModel.login()
+                        }) {
                             HStack {
                                 Image(systemName: viewModel.isLoggedIn ? "person.crop.circle" : "arrow.right.square")
                             }

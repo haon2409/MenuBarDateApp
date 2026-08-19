@@ -16,9 +16,18 @@ final class CalendarPopupViewModel: ObservableObject {
     @Published var isTaskMode: Bool = true
     
     private let calendar = Calendar.current
+    private let auth = GoogleAuthManager.shared
     
     init() {
         generateCalendarGrid()
+        
+        // Đồng bộ trạng thái login
+        isLoggedIn = auth.isLoggedIn
+        if isLoggedIn {
+            Task {
+                await fetchDataFromGoogle()
+            }
+        }
     }
     
     var monthYearString: String {
@@ -32,12 +41,20 @@ final class CalendarPopupViewModel: ObservableObject {
         if let newDate = calendar.date(byAdding: .month, value: offset, to: currentDate) {
             currentDate = newDate
             generateCalendarGrid()
+            
+            if isLoggedIn {
+                Task { await fetchDataFromGoogle() }
+            }
         }
     }
     
     func goToToday() {
         currentDate = Date()
         generateCalendarGrid()
+        
+        if isLoggedIn {
+            Task { await fetchDataFromGoogle() }
+        }
     }
     
     func generateCalendarGrid() {
@@ -84,8 +101,6 @@ final class CalendarPopupViewModel: ObservableObject {
                 }
             }
         }
-        
-        fetchDataFromGoogle()
     }
     
     private func appendDay(date: Date, isCurrentMonth: Bool, today: Date) {
@@ -101,24 +116,201 @@ final class CalendarPopupViewModel: ObservableObject {
         let dateStr = formatter.string(from: date)
         
         let dayModel = DayModel(
-            date: date, dayNumber: dayNum, lunarDay: lunarInfo.day, lunarMonth: lunarInfo.month,
-            isCurrentMonth: isCurrentMonth, isToday: isToday, items: [], dateString: dateStr
+            date: date,
+            dayNumber: dayNum,
+            lunarDay: lunarInfo.day,
+            lunarMonth: lunarInfo.month,
+            isCurrentMonth: isCurrentMonth,
+            isToday: isToday,
+            items: [],
+            dateString: dateStr
         )
         days.append(dayModel)
     }
     
-    // Mock API Call (Thay thế logic fetchMonthlyData trong JS)
-    func fetchDataFromGoogle() {
-        guard isLoggedIn else { return }
-        // TODO: Viết logic gọi URLSession tới Google Calendar/Tasks API
-    }
-    
+    // MARK: - Login / Logout
     func login() {
-        // TODO: Tích hợp ASWebAuthenticationSession / GoogleSignIn
-        isLoggedIn.toggle()
+        if auth.isLoggedIn {
+            // Logout
+            auth.logout()
+            isLoggedIn = false
+            for i in days.indices {
+                days[i].items.removeAll()
+            }
+        } else {
+            // Login
+            auth.login()
+            
+            // Lắng nghe khi login thành công
+            Task {
+                // Chờ tối đa 60 giây
+                for _ in 0..<60 {
+                    try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 giây
+                    
+                    if auth.isLoggedIn {
+                        await MainActor.run {
+                            self.isLoggedIn = true
+                        }
+                        // Đợi thêm 1 chút để token ổn định
+                        try? await Task.sleep(nanoseconds: 800_000_000)
+                        await fetchDataFromGoogle()
+                        break
+                    }
+                }
+            }
+        }
     }
     
-    // Thêm thuộc tính này vào trong CalendarPopupViewModel
+    // MARK: - Fetch Google Data
+    func fetchDataFromGoogle() async {
+        print("🔄 Bắt đầu fetchDataFromGoogle...")
+        
+        guard let token = await auth.refreshAccessTokenIfNeeded() else {
+            print("❌ Không lấy được token")
+            return
+        }
+        
+        print("✅ Có token, bắt đầu fetch...")
+        
+        // Clear items cũ
+        for i in days.indices {
+            days[i].items.removeAll()
+        }
+        
+        await fetchCalendarEvents(token: token)
+        await fetchTasks(token: token)
+        
+        print("✅ Fetch xong. Tổng số item:", days.flatMap { $0.items }.count)
+    }
+    
+    // Thêm hàm helper này vào ViewModel
+    private var visibleDateRange: (start: Date, end: Date)? {
+        guard let first = days.first?.date,
+              let last = days.last?.date else { return nil }
+        return (first, last)
+    }
+    
+    private func fetchCalendarEvents(token: String) async {
+        guard let range = visibleDateRange else { return }
+        
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        
+        // Mở rộng thêm 1 ngày cuối để an toàn
+        let timeMax = calendar.date(byAdding: .day, value: 1, to: range.end)!
+        
+        var components = URLComponents(string: "https://www.googleapis.com/calendar/v3/calendars/primary/events")!
+        components.queryItems = [
+            .init(name: "timeMin", value: formatter.string(from: range.start)),
+            .init(name: "timeMax", value: formatter.string(from: timeMax)),
+            .init(name: "singleEvents", value: "true"),
+            .init(name: "orderBy", value: "startTime"),
+            .init(name: "maxResults", value: "250")
+        ]
+        
+        var request = URLRequest(url: components.url!)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request)
+            
+            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let items = json["items"] as? [[String: Any]] {
+                
+                print("📅 Nhận được \(items.count) events trong khoảng \(days.first?.dateString ?? "") → \(days.last?.dateString ?? "")")
+                
+                for item in items {
+                    guard let summary = item["summary"] as? String else { continue }
+                    
+                    let dateStr: String
+                    if let startDict = item["start"] as? [String: Any] {
+                        if let dateTime = startDict["dateTime"] as? String {
+                            dateStr = String(dateTime.prefix(10))
+                        } else if let date = startDict["date"] as? String {
+                            dateStr = date
+                        } else { continue }
+                    } else { continue }
+                    
+                    let calendarItem = CalendarItem(
+                        id: item["id"] as? String ?? UUID().uuidString,
+                        title: summary,
+                        description: item["description"] as? String,
+                        type: .event,
+                        dateString: dateStr
+                    )
+                    
+                    if let index = days.firstIndex(where: { $0.dateString == dateStr }) {
+                        days[index].items.append(calendarItem)
+                    }
+                }
+            }
+        } catch {
+            print("Calendar fetch error:", error)
+        }
+    }
+    
+    private func fetchTasks(token: String) async {
+        guard let range = visibleDateRange else { return }
+        
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        
+        let dueMin = formatter.string(from: range.start)
+        let dueMax = formatter.string(from: calendar.date(byAdding: .day, value: 1, to: range.end)!)
+        
+        // Dùng @default giống extension
+        var components = URLComponents(string: "https://tasks.googleapis.com/tasks/v1/lists/@default/tasks")!
+        components.queryItems = [
+            .init(name: "dueMin", value: dueMin),
+            .init(name: "dueMax", value: dueMax),
+            .init(name: "showCompleted", value: "true"),
+            .init(name: "showHidden", value: "true"),
+            .init(name: "maxResults", value: "100")
+        ]
+        
+        var request = URLRequest(url: components.url!)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request)
+            
+            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let tasks = json["items"] as? [[String: Any]] {
+                
+                print("✅ Nhận được \(tasks.count) tasks (dùng @default + dueMin/dueMax)")
+                
+                var addedCount = 0
+                
+                for task in tasks {
+                    guard let title = task["title"] as? String,
+                          let due = task["due"] as? String else { continue }
+                    
+                    let dateStr = String(due.prefix(10))
+                    
+                    if let index = days.firstIndex(where: { $0.dateString == dateStr }) {
+                        let calendarItem = CalendarItem(
+                            id: task["id"] as? String ?? UUID().uuidString,
+                            title: title,
+                            description: task["notes"] as? String,
+                            type: .task,
+                            isCompleted: (task["status"] as? String) == "completed",
+                            dateString: dateStr
+                        )
+                        days[index].items.append(calendarItem)
+                        addedCount += 1
+                    }
+                }
+                
+                print("✅ Đã thêm \(addedCount) tasks vào lịch")
+            }
+        } catch {
+            print("Tasks fetch error:", error)
+        }
+    }
+    
+    // MARK: - Popup height
     var totalRows: Int {
         let count = days.count
         return count / 7
@@ -126,7 +318,7 @@ final class CalendarPopupViewModel: ObservableObject {
 
     var popupHeight: CGFloat {
         let cellHeight: CGFloat = 75 + 4
-        let headerHeight: CGFloat = 90 // Tăng nhẹ từ 70 lên 90 để bù khoảng đệm mới
+        let headerHeight: CGFloat = 90
         let padding: CGFloat = 24
         return headerHeight + (CGFloat(totalRows) * cellHeight) + padding
     }

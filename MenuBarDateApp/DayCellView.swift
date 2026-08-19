@@ -45,13 +45,13 @@ struct DayCellView: View {
         // MARK: - Context Menu 3: Vùng trống trong ô ngày
         .contextMenu {
             Button {
-                // todo: Thêm công việc
+                viewModel.openAddModal(isTask: true, dateStr: day.dateString)
             } label: {
                 Text("+ Task")
             }
             
             Button {
-                // todo: Thêm sự kiện
+                viewModel.openAddModal(isTask: false, dateStr: day.dateString)
             } label: {
                 Text("+ Event")
             }
@@ -96,7 +96,7 @@ struct ItemView: View {
             if item.type == .task {
                 // Context Menu 1: Click chuột phải vào Task
                 Button {
-                    // todo: Chỉnh sửa Task
+                    viewModel.openEditModal(for: item)
                 } label: {
                     Text("Edit")
                 }
@@ -111,7 +111,7 @@ struct ItemView: View {
             } else {
                 // Context Menu 2: Click chuột phải vào Event
                 Button {
-                    // todo: Chỉnh sửa Event
+                    viewModel.openEditModal(for: item)
                 } label: {
                     Text("Edit")
                 }

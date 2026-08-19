@@ -15,6 +15,11 @@ final class CalendarPopupViewModel: ObservableObject {
     @Published var modalDesc: String = ""
     @Published var isTaskMode: Bool = true
     
+    // Thuộc tính cho Edit Mode
+    @Published var isEditMode: Bool = false
+    private var editingItemId: String? = nil
+    private var editingItemDateStr: String? = nil
+    
     private let calendar = Calendar.current
     private let auth = GoogleAuthManager.shared
     
@@ -199,7 +204,6 @@ final class CalendarPopupViewModel: ObservableObject {
         print("✅ [Debug] Fetch xong hoàn tất. Tổng số item trên lịch:", days.flatMap { $0.items }.count)
     }
     
-    // Thêm hàm helper này vào ViewModel
     private var visibleDateRange: (start: Date, end: Date)? {
         guard let first = days.first?.date,
               let last = days.last?.date else { return nil }
@@ -334,11 +338,10 @@ final class CalendarPopupViewModel: ObservableObject {
         return headerHeight + (CGFloat(totalRows) * cellHeight) + padding
     }
     
+    // MARK: - Thao tác Dữ liệu
     func deleteItem(_ item: CalendarItem) async {
-        // 1. Lấy token mới nhất
         guard let token = await auth.refreshAccessTokenIfNeeded() else { return }
         
-        // 2. Xác định URL
         let urlString = item.type == .event
             ? "https://www.googleapis.com/calendar/v3/calendars/primary/events/\(item.id)"
             : "https://tasks.googleapis.com/tasks/v1/lists/@default/tasks/\(item.id)"
@@ -349,12 +352,9 @@ final class CalendarPopupViewModel: ObservableObject {
         request.httpMethod = "DELETE"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         
-        // 3. Thực hiện request
         do {
             let (_, response) = try await URLSession.shared.data(for: request)
             if let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) {
-                
-                // 4. Cập nhật UI (Xóa item khỏi danh sách)
                 await MainActor.run {
                     if let dayIndex = days.firstIndex(where: { $0.dateString == item.dateString }) {
                         days[dayIndex].items.removeAll(where: { $0.id == item.id })
@@ -369,7 +369,6 @@ final class CalendarPopupViewModel: ObservableObject {
     func toggleTaskStatus(_ item: CalendarItem) async {
         guard item.type == .task else { return }
         
-        // 1. Optimistic UI: Đổi trạng thái hiển thị ngay lập tức
         await MainActor.run {
             if let dayIndex = days.firstIndex(where: { $0.dateString == item.dateString }),
                let itemIndex = days[dayIndex].items.firstIndex(where: { $0.id == item.id }) {
@@ -377,15 +376,13 @@ final class CalendarPopupViewModel: ObservableObject {
             }
         }
         
-        // 2. Lấy Access Token
         guard let token = await auth.refreshAccessTokenIfNeeded() else {
             await rollbackStatus(item)
             return
         }
         
-        // 3. Chuẩn bị Request PATCH tới Google Tasks API
         let newStatus = !item.isCompleted ? "completed" : "needsAction"
-        let urlString = "https://www.googleapis.com/tasks/v1/lists/@default/tasks/\(item.id)"
+        let urlString = "https://tasks.googleapis.com/tasks/v1/lists/@default/tasks/\(item.id)"
         guard let url = URL(string: urlString) else { return }
         
         var request = URLRequest(url: url)
@@ -408,7 +405,6 @@ final class CalendarPopupViewModel: ObservableObject {
             
             if let httpResponse = response as? HTTPURLResponse {
                 if httpResponse.statusCode == 401 {
-                    // Thử lại với token mới nếu token cũ hết hạn
                     if let newToken = await auth.refreshAccessTokenIfNeeded(forceRefresh: true) {
                         request.setValue("Bearer \(newToken)", forHTTPHeaderField: "Authorization")
                         let (_, retryResponse) = try await URLSession.shared.data(for: request)
@@ -434,6 +430,111 @@ final class CalendarPopupViewModel: ObservableObject {
                let itemIndex = days[dayIndex].items.firstIndex(where: { $0.id == item.id }) {
                 days[dayIndex].items[itemIndex].isCompleted.toggle()
             }
+        }
+    }
+    
+    // MARK: - Mở Modal Edit / Add
+    func openEditModal(for item: CalendarItem) {
+        self.modalTitle = item.title
+        self.modalDesc = item.description ?? ""
+        self.isTaskMode = (item.type == .task)
+        
+        self.isEditMode = true
+        self.editingItemId = item.id
+        self.editingItemDateStr = item.dateString
+        
+        self.showAddModal = true
+    }
+
+    func openAddModal(isTask: Bool, dateStr: String) {
+        self.modalTitle = ""
+        self.modalDesc = ""
+        self.isTaskMode = isTask
+        
+        self.isEditMode = false
+        self.editingItemId = nil
+        self.selectedDateStr = dateStr
+        
+        self.showAddModal = true
+    }
+    
+    // MARK: - Gửi Request Cập Nhật (PATCH)
+    // MARK: - Gửi Request Cập Nhật (PATCH)
+    func submitEditItem() async {
+        print("🔄 [DEBUG EDIT] Bắt đầu gọi hàm submitEditItem()")
+        
+        guard let id = editingItemId,
+              let dateStr = editingItemDateStr else {
+            print("❌ [DEBUG EDIT] Thất bại: editingItemId hoặc editingItemDateStr đang bị nil")
+            return
+        }
+        
+        guard let token = await auth.refreshAccessTokenIfNeeded() else {
+            print("❌ [DEBUG EDIT] Thất bại: Không lấy được Access Token")
+            return
+        }
+        
+        let isTask = isTaskMode
+        let newTitle = modalTitle
+        let newDesc = modalDesc
+        
+        print("📝 [DEBUG EDIT] Dữ liệu chuẩn bị gửi - isTask: \(isTask), id: \(id), title: \(newTitle)")
+        
+        // 1. Optimistic UI: Hiển thị thay đổi ngay lập tức
+        await MainActor.run {
+            if let dayIndex = days.firstIndex(where: { $0.dateString == dateStr }),
+               let itemIndex = days[dayIndex].items.firstIndex(where: { $0.id == id }) {
+                days[dayIndex].items[itemIndex].title = newTitle
+                days[dayIndex].items[itemIndex].description = newDesc
+                self.showAddModal = false
+                print("✅ [DEBUG EDIT] Đã cập nhật Optimistic UI cục bộ")
+            } else {
+                print("⚠️ [DEBUG EDIT] Không tìm thấy item trong ViewModel array để cập nhật UI cục bộ")
+            }
+        }
+        
+        // 2. Gọi API PATCH
+        let urlString = isTask
+            ? "https://tasks.googleapis.com/tasks/v1/lists/@default/tasks/\(id)"
+            : "https://www.googleapis.com/calendar/v3/calendars/primary/events/\(id)"
+        
+        guard let url = URL(string: urlString) else {
+            print("❌ [DEBUG EDIT] Lỗi parse URL: \(urlString)")
+            return
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "PATCH"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        let body: [String: Any] = isTask
+            ? ["title": newTitle, "notes": newDesc]
+            : ["summary": newTitle, "description": newDesc]
+        
+        print("🌐 [DEBUG EDIT] URL: \(urlString)")
+        print("📦 [DEBUG EDIT] Body: \(body)")
+        
+        do {
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+            let (data, response) = try await URLSession.shared.data(for: request)
+            
+            if let httpResponse = response as? HTTPURLResponse {
+                print("📡 [DEBUG EDIT] HTTP Status Code: \(httpResponse.statusCode)")
+                
+                if !(200...299).contains(httpResponse.statusCode) {
+                    // In ra chi tiết lỗi Google trả về
+                    if let errorString = String(data: data, encoding: .utf8) {
+                        print("❌ [DEBUG EDIT] Lỗi từ API Google: \n\(errorString)")
+                    }
+                    await fetchDataFromGoogle() // Rollback dữ liệu nếu lỗi
+                } else {
+                    print("✅ [DEBUG EDIT] Lưu (PATCH) thành công trên server Google!")
+                }
+            }
+        } catch {
+            print("❌ [DEBUG EDIT] Lỗi kết nối / Network error:", error.localizedDescription)
+            await fetchDataFromGoogle() // Rollback dữ liệu nếu lỗi
         }
     }
 }

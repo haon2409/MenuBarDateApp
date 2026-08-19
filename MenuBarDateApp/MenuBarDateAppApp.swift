@@ -1,26 +1,6 @@
 import SwiftUI
 import Combine
 
-@main
-struct MenuBarDateApp: App {
-    @StateObject private var viewModel = MenuBarViewModel()
-
-    var body: some Scene {
-        MenuBarExtra {
-            Button("Quit") {
-                NSApplication.shared.terminate(nil)
-            }
-        } label: {
-            // Chỉ hiển thị 1 Image duy nhất đã gom cả Icon và Text
-            if let icon = viewModel.combinedIcon {
-                icon
-            }
-        }
-    }
-}
-
-// MARK: - ViewModel
-
 @MainActor
 final class MenuBarViewModel: ObservableObject {
     @Published var combinedIcon: Image?
@@ -85,7 +65,7 @@ final class MenuBarViewModel: ObservableObject {
             // MARK: - Nửa 2: Thông tin chi tiết
             VStack(alignment: .leading, spacing: 1) {
                 // Hàng 1: Dương lịch
-                HStack(spacing: 2) { // Giảm spacing xuống 2
+                HStack(spacing: 2) {
                     Text("\(day)/\(month)")
                         .font(.system(size: 11, weight: .semibold, design: .rounded))
                         .monospacedDigit()
@@ -108,7 +88,7 @@ final class MenuBarViewModel: ObservableObject {
                     .padding(.vertical, -0.5)
                 
                 // Hàng 2: Âm lịch
-                HStack(spacing: 2) { // Giảm spacing xuống 2
+                HStack(spacing: 2) {
                     Text("\(lunar.day)/\(lunar.month)")
                         .font(.system(size: 11, weight: .semibold, design: .rounded))
                         .monospacedDigit()
@@ -124,7 +104,7 @@ final class MenuBarViewModel: ObservableObject {
                         .clipShape(RoundedRectangle(cornerRadius: 2))
                 }
             }
-            .frame(width: 48) // Thu nhỏ tổng chiều rộng tương ứng để ép sát hơn
+            .frame(width: 48)
         }
         .fixedSize()
 
@@ -153,7 +133,6 @@ final class MenuBarViewModel: ObservableObject {
 }
 
 // MARK: - Calendar Card View
-
 struct CalendarCardView: View {
     let weekday: String
 

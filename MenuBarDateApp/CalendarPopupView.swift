@@ -48,6 +48,7 @@ struct CalendarPopupView: View {
                             .cornerRadius(6)
                         }
                         .buttonStyle(PlainButtonStyle())
+                        .focusable(false)
                         .disabled(viewModel.isLoading)
                         
                         HStack(spacing: 4) {
@@ -110,5 +111,6 @@ struct CalendarPopupView: View {
                 .cornerRadius(6)
         }
         .buttonStyle(PlainButtonStyle())
+        .focusable(false)
     }
 }

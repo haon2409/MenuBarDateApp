@@ -16,7 +16,6 @@ final class CalendarPopupViewModel: ObservableObject {
     @Published var showAddModal: Bool = false
     @Published var selectedDateStr: String = ""
     
-    @Published var profileImageUrl: URL? = nil
     @Published var profileImage: NSImage? = nil
     
     // Thuộc tính Form cơ bản
@@ -75,28 +74,18 @@ final class CalendarPopupViewModel: ObservableObject {
         }
     }
     
-    // MARK: - Hàm fetchAndLoadImage
     func fetchAndLoadImage() async {
-        print("⏳ [ViewModel] Đang request URL Avatar từ GoogleAuth...")
-        guard let url = await auth.fetchProfileImageURL() else {
-            print("❌ [ViewModel] URL Avatar trả về nil, dừng tải ảnh.")
-            return
-        }
-        
-        print("⏳ [ViewModel] Bắt đầu tải data ảnh từ: \(url.absoluteString)")
+        guard let url = await auth.fetchProfileImageURL() else { return }
         do {
             let (data, _) = try await URLSession.shared.data(from: url)
             if let image = NSImage(data: data) {
                 await MainActor.run {
-                    self.profileImageUrl = url // Có thể lưu lại URL nếu cần dùng sau này
+                    // Chỉ cần gán ảnh, xoá dòng gán self.profileImageUrl = url (nếu đang có)
                     self.profileImage = image
-                    print("✅ [ViewModel] Convert data sang NSImage thành công và đã cập nhật UI!")
                 }
-            } else {
-                print("❌ [ViewModel] Lỗi: Data tải về không thể khởi tạo thành NSImage.")
             }
         } catch {
-            print("❌ [ViewModel] Lỗi tải data ảnh từ URLSession: \(error)")
+            print("Lỗi tải data ảnh: \(error)")
         }
     }
     
@@ -237,8 +226,7 @@ final class CalendarPopupViewModel: ObservableObject {
         if auth.isLoggedIn {
             auth.logout()
             isLoggedIn = false
-            profileImageUrl = nil
-            // ... rest of logout logic
+            profileImage = nil
         } else {
             auth.login()
             Task {

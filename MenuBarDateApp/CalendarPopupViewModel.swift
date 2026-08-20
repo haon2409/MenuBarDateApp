@@ -74,17 +74,43 @@ final class CalendarPopupViewModel: ObservableObject {
     }
     
     // MARK: - Set Tháng / Năm từ Picker (có guard chống gọi trùng)
+    /// Đổi tháng, giữ nguyên năm + clamp ngày hợp lệ
     func setMonth(_ month: Int) {
-        guard month != currentMonth else { return }
-        guard let newDate = calendar.date(bySetting: .month, value: month, of: currentDate) else { return }
+        guard (1...12).contains(month), month != currentMonth else { return }
+        
+        var components = calendar.dateComponents([.year, .month, .day], from: currentDate)
+        components.month = month
+        
+        // Clamp ngày nếu tháng mới có ít ngày hơn
+        if let year = components.year,
+           let day = components.day,
+           let firstOfMonth = calendar.date(from: DateComponents(year: year, month: month, day: 1)),
+           let range = calendar.range(of: .day, in: .month, for: firstOfMonth) {
+            components.day = min(day, range.count)
+        }
+        
+        guard let newDate = calendar.date(from: components) else { return }
         currentDate = newDate
         generateCalendarGrid()
         if isLoggedIn { Task { await fetchDataFromGoogle() } }
     }
     
+    /// Đổi năm, giữ nguyên tháng + clamp ngày hợp lệ
     func setYear(_ year: Int) {
-        guard year != currentYear else { return }
-        guard let newDate = calendar.date(bySetting: .year, value: year, of: currentDate) else { return }
+        guard yearRange.contains(year), year != currentYear else { return }
+        
+        var components = calendar.dateComponents([.year, .month, .day], from: currentDate)
+        components.year = year
+        
+        // Clamp ngày nếu tháng 2 năm nhuận/không nhuận
+        if let month = components.month,
+           let day = components.day,
+           let firstOfMonth = calendar.date(from: DateComponents(year: year, month: month, day: 1)),
+           let range = calendar.range(of: .day, in: .month, for: firstOfMonth) {
+            components.day = min(day, range.count)
+        }
+        
+        guard let newDate = calendar.date(from: components) else { return }
         currentDate = newDate
         generateCalendarGrid()
         if isLoggedIn { Task { await fetchDataFromGoogle() } }

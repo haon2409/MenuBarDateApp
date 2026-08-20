@@ -38,6 +38,21 @@ final class CalendarPopupViewModel: ObservableObject {
     private let calendar = Calendar.current
     private let auth = GoogleAuthManager.shared
     
+    // MARK: - Computed cho Picker Tháng / Năm
+    var currentMonth: Int {
+        calendar.component(.month, from: currentDate)
+    }
+    
+    var currentYear: Int {
+        calendar.component(.year, from: currentDate)
+    }
+    
+    /// Năm hiện tại ± 50 năm
+    var yearRange: [Int] {
+        let y = calendar.component(.year, from: Date())
+        return Array((y - 50)...(y + 50))
+    }
+    
     init() {
         generateCalendarGrid()
         isLoggedIn = auth.isLoggedIn
@@ -58,6 +73,23 @@ final class CalendarPopupViewModel: ObservableObject {
         return formatter.string(from: currentDate)
     }
     
+    // MARK: - Set Tháng / Năm từ Picker (có guard chống gọi trùng)
+    func setMonth(_ month: Int) {
+        guard month != currentMonth else { return }
+        guard let newDate = calendar.date(bySetting: .month, value: month, of: currentDate) else { return }
+        currentDate = newDate
+        generateCalendarGrid()
+        if isLoggedIn { Task { await fetchDataFromGoogle() } }
+    }
+    
+    func setYear(_ year: Int) {
+        guard year != currentYear else { return }
+        guard let newDate = calendar.date(bySetting: .year, value: year, of: currentDate) else { return }
+        currentDate = newDate
+        generateCalendarGrid()
+        if isLoggedIn { Task { await fetchDataFromGoogle() } }
+    }
+    
     func changeMonth(by offset: Int) {
         if let newDate = calendar.date(byAdding: .month, value: offset, to: currentDate) {
             currentDate = newDate
@@ -67,6 +99,8 @@ final class CalendarPopupViewModel: ObservableObject {
     }
     
     func goToToday() {
+        // Chỉ cập nhật nếu không phải tháng hiện tại
+        guard !calendar.isDate(currentDate, equalTo: Date(), toGranularity: .month) else { return }
         currentDate = Date()
         generateCalendarGrid()
         if isLoggedIn { Task { await fetchDataFromGoogle() } }
@@ -402,7 +436,7 @@ final class CalendarPopupViewModel: ObservableObject {
     
     // MARK: - Gửi Request Thêm Mới (POST)
         func submitAddItem() async {
-            // 1. Lấy thông tin cơ bản[cite: 1]
+            // 1. Lấy thông tin cơ bản
             let isTask = isTaskMode
             let newTitle = modalTitle.isEmpty ? "(Không có tiêu đề)" : modalTitle
             let newDesc = modalDesc
@@ -415,7 +449,7 @@ final class CalendarPopupViewModel: ObservableObject {
             let calendar = Calendar.current
             let baseYear = calendar.component(.year, from: baseDate)
             
-            // Tính ngày Âm gốc[cite: 1]
+            // Tính ngày Âm gốc
             let lunarBase = LunarEngine.getLunarDate(
                 dd: calendar.component(.day, from: baseDate),
                 mm: calendar.component(.month, from: baseDate),
@@ -424,7 +458,7 @@ final class CalendarPopupViewModel: ObservableObject {
             
             await MainActor.run { self.showAddModal = false }
             
-            // 2. Vòng lặp tạo Task[cite: 1]
+            // 2. Vòng lặp tạo Task
             for i in 0..<maxTimes {
                 // Cập nhật token trước mỗi lần gửi request trong vòng lặp
                 guard let token = await auth.refreshAccessTokenIfNeeded() else { break }
@@ -458,7 +492,7 @@ final class CalendarPopupViewModel: ObservableObject {
                     targetDateStr = selectedDateStr
                 }
                 
-                // 3. Chuẩn bị request[cite: 1]
+                // 3. Chuẩn bị request
                 let urlString = isTask
                     ? "https://tasks.googleapis.com/tasks/v1/lists/@default/tasks"
                     : "https://www.googleapis.com/calendar/v3/calendars/primary/events"
@@ -481,7 +515,7 @@ final class CalendarPopupViewModel: ObservableObject {
                     "end": ["date": targetDateStr]
                 ]
                 
-                // 4. Thực hiện request và xử lý lỗi 401 (retry 1 lần)[cite: 1]
+                // 4. Thực hiện request và xử lý lỗi 401 (retry 1 lần)
                 do {
                     request.httpBody = try JSONSerialization.data(withJSONObject: body)
                     let (data, response) = try await URLSession.shared.data(for: request)

@@ -20,11 +20,37 @@ struct CalendarPopupView: View {
             VStack(spacing: 12) {
                 // MARK: - Header
                 HStack {
-                    // 1. Tiêu đề Tháng/Năm
-                    Text(viewModel.monthYearString)
-                        .font(.system(size: 16))
-                        .foregroundColor(.white)
-                        .layoutPriority(1) // Đảm bảo text không bị ép co lại khi thanh progress hiển thị
+                    // 1. Select Tháng + Năm
+                    HStack(spacing: 8) {
+                        // Picker Tháng (1→12)
+                        Picker("", selection: Binding(
+                            get: { viewModel.currentMonth },
+                            set: { viewModel.setMonth($0) }
+                        )) {
+                            ForEach(1...12, id: \.self) { month in
+                                Text("Tháng \(month)").tag(month)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .labelsHidden()
+                        .accentColor(.white)
+                        .disabled(viewModel.isLoading)
+                        
+                        // Picker Năm (±50 năm)
+                        Picker("", selection: Binding(
+                            get: { viewModel.currentYear },
+                            set: { viewModel.setYear($0) }
+                        )) {
+                            ForEach(viewModel.yearRange, id: \.self) { year in
+                                Text(String(year)).tag(year)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .labelsHidden()
+                        .accentColor(.white)
+                        .disabled(viewModel.isLoading)
+                    }
+                    .layoutPriority(1)
                     
                     // 2. Thanh Progress nằm giữa (thay thế Spacer khi đang load)
                     if viewModel.isLoading {
@@ -96,9 +122,9 @@ struct CalendarPopupView: View {
         }
         .frame(width: 770, height: viewModel.popupHeight) // Co giãn chiều cao động theo viewModel
         .onAppear {
-                    // Sự kiện này xảy ra mỗi khi Popup được mở
-                    viewModel.onPopupAppear()
-                }
+            // Sự kiện này xảy ra mỗi khi Popup được mở
+            viewModel.onPopupAppear()
+        }
     }
     
     private func navButton(icon: String, action: @escaping () -> Void) -> some View {

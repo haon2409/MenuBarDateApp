@@ -76,20 +76,19 @@ struct AddModalView: View {
                         .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(hex: "#4a4d53"), lineWidth: 1))
                         
                         // Nội dung theo Tab
+                        // ... bên trong khối if viewModel.isRepeat ...
+
                         if viewModel.selectedTab == .solar {
-                            // Nội dung Tab Dương Lịch
+                            // --- Nội dung Tab Dương Lịch (Giữ nguyên) ---
                             HStack(spacing: 4) {
                                 Text("Mỗi:")
                                     .font(.system(size: 11))
                                     .foregroundColor(.white)
                                 
                                 Picker("", selection: $viewModel.repeatInterval) {
-                                    ForEach(1...30, id: \.self) { i in
-                                        Text("\(i)").tag(i)
-                                    }
+                                    ForEach(1...30, id: \.self) { i in Text("\(i)").tag(i) }
                                 }
-                                .frame(width: 45)
-                                .clipped()
+                                .frame(width: 45).clipped()
                                 
                                 Picker("", selection: $viewModel.repeatUnit) {
                                     Text("Ngày").tag("days")
@@ -97,8 +96,7 @@ struct AddModalView: View {
                                     Text("Tháng").tag("months")
                                     Text("Năm").tag("years")
                                 }
-                                .frame(width: 75)
-                                .clipped()
+                                .frame(width: 75).clipped()
                                 
                                 Text("- Số lần:")
                                     .font(.system(size: 11))
@@ -115,14 +113,28 @@ struct AddModalView: View {
                                     .cornerRadius(4)
                             }
                         } else {
-                            // Nội dung Tab Âm Lịch
-                            HStack {
-                                Spacer()
-                                Text("Cài đặt Âm lịch (Chờ mở rộng)")
+                            // --- Nội dung Tab Âm Lịch (Mới) ---
+                            HStack(spacing: 4) {
+                                Text("Mỗi 1 năm")
                                     .font(.system(size: 11))
                                     .foregroundColor(.gray)
-                                    .padding(.vertical, 4)
+                                    .padding(.leading, 4)
+                                
                                 Spacer()
+                                
+                                Text("- Số lần:")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.white)
+                                
+                                TextField("3", text: $viewModel.repeatTimes)
+                                    .textFieldStyle(PlainTextFieldStyle())
+                                    .font(.system(size: 11))
+                                    .multilineTextAlignment(.center)
+                                    .frame(width: 30)
+                                    .padding(.vertical, 4)
+                                    .background(Color(hex: "#202124"))
+                                    .foregroundColor(.white)
+                                    .cornerRadius(4)
                             }
                         }
                     }

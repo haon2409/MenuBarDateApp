@@ -20,12 +20,22 @@ struct CalendarPopupView: View {
             VStack(spacing: 12) {
                 // MARK: - Header
                 HStack {
+                    // 1. Tiêu đề Tháng/Năm
                     Text(viewModel.monthYearString)
                         .font(.system(size: 16))
                         .foregroundColor(.white)
+                        .layoutPriority(1) // Đảm bảo text không bị ép co lại khi thanh progress hiển thị
                     
-                    Spacer()
+                    // 2. Thanh Progress nằm giữa (thay thế Spacer khi đang load)
+                    if viewModel.isLoading {
+                        ProgressView()
+                            .progressViewStyle(LinearProgressViewStyle(tint: cyanColor))
+                            .padding(.horizontal, 16)
+                    } else {
+                        Spacer()
+                    }
                     
+                    // 3. Cụm nút Control
                     HStack(spacing: 8) {
                         Button(action: {
                             viewModel.login()
@@ -38,16 +48,21 @@ struct CalendarPopupView: View {
                             .cornerRadius(6)
                         }
                         .buttonStyle(PlainButtonStyle())
+                        .disabled(viewModel.isLoading)
                         
                         HStack(spacing: 4) {
                             navButton(icon: "arrow.left", action: { viewModel.changeMonth(by: -1) })
+                                .disabled(viewModel.isLoading)
+                            
                             navButton(icon: "circle.fill", action: viewModel.goToToday)
-                                .disabled(Calendar.current.isDate(viewModel.currentDate, equalTo: Date(), toGranularity: .month))
+                                .disabled(Calendar.current.isDate(viewModel.currentDate, equalTo: Date(), toGranularity: .month) || viewModel.isLoading)
+                            
                             navButton(icon: "arrow.right", action: { viewModel.changeMonth(by: 1) })
+                                .disabled(viewModel.isLoading)
                         }
                     }
                 }
-                .padding(.top, 12) // Tăng khoảng cách từ cạnh trên xuống 100%
+                .padding(.top, 12)
                 
                 // MARK: - Weekdays
                 HStack(spacing: 4) {

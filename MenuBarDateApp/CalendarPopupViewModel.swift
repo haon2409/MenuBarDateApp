@@ -26,6 +26,8 @@ final class CalendarPopupViewModel: ObservableObject {
     @Published var repeatUnit: String = "days" // "days", "weeks", "months", "years"
     @Published var repeatTimes: String = "3"
     
+    @Published var isLoading: Bool = false // Biến trạng thái loading mới
+    
     private let calendar = Calendar.current
     private let auth = GoogleAuthManager.shared
     
@@ -154,6 +156,9 @@ final class CalendarPopupViewModel: ObservableObject {
     
     // MARK: - Fetch Google Data
     func fetchDataFromGoogle(isRetry: Bool = false) async {
+        isLoading = true // Bật trạng thái tải
+        defer { isLoading = false } // Đảm bảo luôn tắt khi kết thúc hàm
+        
         guard let token = await auth.refreshAccessTokenIfNeeded(forceRefresh: isRetry) else { return }
         for i in days.indices { days[i].items.removeAll() }
         
@@ -349,7 +354,6 @@ final class CalendarPopupViewModel: ObservableObject {
         self.editingItemId = nil
         self.selectedDateStr = dateStr
         
-        // Reset tùy chọn lặp lại khi mở lại form[cite: 4]
         self.isRepeat = false
         self.repeatInterval = 1
         self.repeatUnit = "days"
@@ -387,14 +391,11 @@ final class CalendarPopupViewModel: ObservableObject {
         let newTitle = modalTitle.isEmpty ? "(Không có tiêu đề)" : modalTitle
         let newDesc = modalDesc
         
-        // 1. Nếu là task lặp lại, xác định số vòng lặp[cite: 4]
         let maxTimes = (isTask && isRepeat) ? max(1, min(Int(repeatTimes) ?? 3, 100)) : 1
         var currentIteratorDateStr = selectedDateStr
         
-        // 2. Đóng modal ngay lập tức để UX mượt
         await MainActor.run { self.showAddModal = false }
         
-        // 3. Vòng lặp bắn API nhiều lần nếu là repeat task[cite: 4]
         for _ in 0..<maxTimes {
             let targetDate = currentIteratorDateStr
             let urlString = isTask
@@ -437,13 +438,12 @@ final class CalendarPopupViewModel: ObservableObject {
                         }
                     }
                 } else {
-                    await fetchDataFromGoogle() // Tải lại đồng bộ nếu có lỗi ở bất kỳ vòng lặp nào
+                    await fetchDataFromGoogle()
                 }
             } catch {
                 await fetchDataFromGoogle()
             }
             
-            // Tính toán ngày tiếp theo cho vòng lặp kế tiếp[cite: 4]
             if isTask && isRepeat {
                 currentIteratorDateStr = calculateNextDate(dateString: currentIteratorDateStr, interval: repeatInterval, unit: repeatUnit)
             }

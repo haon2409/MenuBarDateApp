@@ -71,8 +71,6 @@ class LunarEngine {
     
     static func getYearInfo(yyyy: Int) -> [LunarDate] {
         let index = yyyy - 2000
-        // Debug: Kiểm tra xem index có nằm trong phạm vi mảng không
-        print("DEBUG: Lấy dữ liệu cho năm \(yyyy), index: \(index)")
         
         guard index >= 0 && index < TK21.count else {
             print("LỖI: Năm \(yyyy) nằm ngoài phạm vi dữ liệu!")
@@ -138,7 +136,6 @@ class LunarEngine {
     
     static func getSolarDate(day: Int, month: Int, year: Int, leap: Int = 0) -> Date? {
         let ly = getYearInfo(yyyy: year)
-        print("DEBUG: Tháng 7 năm \(year) có JD là: \(ly.first(where: { $0.month == 7 })?.jd ?? 0)")
         
         guard let monthData = ly.first(where: { $0.month == month && $0.leap == leap }) else {
             return nil

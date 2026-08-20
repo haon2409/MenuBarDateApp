@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import Combine
+import AppKit
 
 enum CalendarTab: String {
     case solar = "Dương Lịch"
@@ -14,6 +15,9 @@ final class CalendarPopupViewModel: ObservableObject {
     @Published var isLoggedIn: Bool = false
     @Published var showAddModal: Bool = false
     @Published var selectedDateStr: String = ""
+    
+    @Published var profileImageUrl: URL? = nil
+    @Published var profileImage: NSImage? = nil
     
     // Thuộc tính Form cơ bản
     @Published var modalTitle: String = ""
@@ -62,7 +66,25 @@ final class CalendarPopupViewModel: ObservableObject {
         currentDate = Date()
         generateCalendarGrid()
         if isLoggedIn {
-            Task { await fetchDataFromGoogle() }
+            Task {
+                // Thêm dòng này để lấy lại avatar khi mở app
+                let imageUrl = await auth.fetchProfileImageURL()
+                await MainActor.run { self.profileImageUrl = imageUrl }
+
+                await fetchDataFromGoogle()
+            }
+        }
+    }
+    
+    func fetchAndLoadImage() async {
+        guard let url = await auth.fetchProfileImageURL() else { return }
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            if let image = NSImage(data: data) {
+                await MainActor.run { self.profileImage = image }
+            }
+        } catch {
+            print("Lỗi tải data ảnh: \(error)")
         }
     }
     
@@ -199,20 +221,21 @@ final class CalendarPopupViewModel: ObservableObject {
         days.append(dayModel)
     }
     
-    // MARK: - Login / Logout
     func login() {
         if auth.isLoggedIn {
             auth.logout()
             isLoggedIn = false
-            for i in days.indices { days[i].items.removeAll() }
+            profileImageUrl = nil
+            // ... rest of logout logic
         } else {
             auth.login()
             Task {
+                // Đợi đăng nhập
                 for _ in 0..<60 {
                     try? await Task.sleep(nanoseconds: 500_000_000)
                     if auth.isLoggedIn {
                         await MainActor.run { self.isLoggedIn = true }
-                        try? await Task.sleep(nanoseconds: 800_000_000)
+                        await fetchAndLoadImage()
                         await fetchDataFromGoogle()
                         break
                     }

@@ -66,16 +66,29 @@ struct CalendarPopupView: View {
                         Button(action: {
                             viewModel.login()
                         }) {
-                            HStack {
-                                Image(systemName: viewModel.isLoggedIn ? "person.crop.circle" : "arrow.right.square")
+                            if viewModel.isLoggedIn {
+                                if let nsImage = viewModel.profileImage {
+                                    // Trường hợp 1: Đã load xong ảnh thực tế
+                                    Image(nsImage: nsImage)
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 24, height: 24)
+                                        .clipShape(Circle())
+                                } else {
+                                    // Trường hợp 2: Đang load ảnh hoặc load lỗi
+                                    Image(systemName: "person.crop.circle")
+                                        .resizable()
+                                        .frame(width: 24, height: 24)
+                                        .foregroundColor(.gray)
+                                }
+                            } else {
+                                // Trường hợp 3: Chưa đăng nhập
+                                Image(systemName: "arrow.right.square")
+                                    .padding(6)
                             }
-                            .padding(6)
-                            .background(Color(hex: "#4a4d53"))
-                            .cornerRadius(6)
                         }
-                        .buttonStyle(PlainButtonStyle())
-                        .focusable(false)
-                        .disabled(viewModel.isLoading)
+                        .help(viewModel.isLoggedIn ? "logout" : "login")
+                        .buttonStyle(PlainButtonStyle()) // Bổ sung dòng này để triệt tiêu hiệu ứng hover xám mặc định của macOS
                         
                         HStack(spacing: 4) {
                             navButton(icon: "arrow.left", action: { viewModel.changeMonth(by: -1) })

@@ -14,8 +14,9 @@ final class GoogleAuthManager: NSObject, ObservableObject {
     private let clientID = "755541392936-hao1n89s0gpmb9am1maphkie44svgve8.apps.googleusercontent.com"
     private let redirectURI = "Mimosa.MenuBarDateApp:/oauthredirect"
     private let scopes = [
-        "https://www.googleapis.com/auth/calendar",          // Full Calendar (xem + thêm + sửa + xóa)
-        "https://www.googleapis.com/auth/tasks"              // Full Tasks (xem + thêm + sửa + xóa)
+        "https://www.googleapis.com/auth/calendar",
+        "https://www.googleapis.com/auth/tasks",
+        "https://www.googleapis.com/auth/userinfo.profile" // Thêm dòng này để lấy thông tin profile
     ].joined(separator: " ")
     
     private var codeVerifier = ""
@@ -168,6 +169,27 @@ final class GoogleAuthManager: NSObject, ObservableObject {
             accessToken = token
             isLoggedIn = true
         }
+    }
+    
+    func fetchProfileImageURL() async -> URL? {
+        guard let token = accessToken else { return nil }
+        
+        // API lấy thông tin profile người dùng
+        let url = URL(string: "https://people.googleapis.com/v1/people/me?personFields=photos")!
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request)
+            let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            if let photos = json?["photos"] as? [[String: Any]],
+               let urlString = photos.first?["url"] as? String {
+                return URL(string: urlString)
+            }
+        } catch {
+            print("Error fetching profile image: \(error)")
+        }
+        return nil
     }
     
     // MARK: - PKCE helpers

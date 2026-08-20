@@ -401,102 +401,117 @@ final class CalendarPopupViewModel: ObservableObject {
     }
     
     // MARK: - Gửi Request Thêm Mới (POST)
-    func submitAddItem() async {
-        // 1. Lấy thông tin cơ bản
-        let isTask = isTaskMode
-        let newTitle = modalTitle.isEmpty ? "(Không có tiêu đề)" : modalTitle
-        let newDesc = modalDesc
-        let maxTimes = (isRepeat) ? max(1, min(Int(repeatTimes) ?? 1, 100)) : 1
-        
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        guard let baseDate = formatter.date(from: selectedDateStr) else { return }
-        
-        let calendar = Calendar.current
-        let baseYear = calendar.component(.year, from: baseDate)
-        
-        // Tính ngày Âm gốc
-        let lunarBase = LunarEngine.getLunarDate(
-            dd: calendar.component(.day, from: baseDate),
-            mm: calendar.component(.month, from: baseDate),
-            yyyy: baseYear
-        )
-        
-        await MainActor.run { self.showAddModal = false }
-        
-        // 2. Vòng lặp tạo Task
-        for i in 0..<maxTimes {
-            // Cập nhật token trước mỗi lần gửi request trong vòng lặp
-            guard let token = await auth.refreshAccessTokenIfNeeded() else { break }
+        func submitAddItem() async {
+            // 1. Lấy thông tin cơ bản[cite: 1]
+            let isTask = isTaskMode
+            let newTitle = modalTitle.isEmpty ? "(Không có tiêu đề)" : modalTitle
+            let newDesc = modalDesc
+            let maxTimes = (isRepeat) ? max(1, min(Int(repeatTimes) ?? 1, 100)) : 1
             
-            let targetDateStr: String
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyy-MM-dd"
+            guard let baseDate = formatter.date(from: selectedDateStr) else { return }
             
-            // Logic chọn ngày cho từng lần lặp
-            if isRepeat && selectedTab == .lunar {
-                let targetYear = baseYear + i
-                if let solarDate = LunarEngine.getSolarDate(day: lunarBase.day, month: lunarBase.month, year: targetYear) {
-                    targetDateStr = formatter.string(from: solarDate)
-                } else { continue }
-            } else if isRepeat && selectedTab == .solar {
-                targetDateStr = calculateNextDate(dateString: selectedDateStr, interval: i * repeatInterval, unit: repeatUnit)
-            } else {
-                targetDateStr = selectedDateStr
-            }
+            let calendar = Calendar.current
+            let baseYear = calendar.component(.year, from: baseDate)
             
-            // 3. Chuẩn bị request
-            let urlString = isTask
-                ? "https://tasks.googleapis.com/tasks/v1/lists/@default/tasks"
-                : "https://www.googleapis.com/calendar/v3/calendars/primary/events"
+            // Tính ngày Âm gốc[cite: 1]
+            let lunarBase = LunarEngine.getLunarDate(
+                dd: calendar.component(.day, from: baseDate),
+                mm: calendar.component(.month, from: baseDate),
+                yyyy: baseYear
+            )
             
-            guard let url = URL(string: urlString) else { continue }
+            await MainActor.run { self.showAddModal = false }
             
-            var request = URLRequest(url: url)
-            request.httpMethod = "POST"
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            
-            let body: [String: Any] = isTask ? [
-                "title": newTitle,
-                "notes": newDesc,
-                "due": "\(targetDateStr)T00:00:00.000Z"
-            ] : [
-                "summary": newTitle,
-                "description": newDesc,
-                "start": ["date": targetDateStr],
-                "end": ["date": targetDateStr]
-            ]
-            
-            // 4. Thực hiện request và xử lý lỗi 401 (retry 1 lần)
-            do {
-                request.httpBody = try JSONSerialization.data(withJSONObject: body)
-                let (data, response) = try await URLSession.shared.data(for: request)
+            // 2. Vòng lặp tạo Task[cite: 1]
+            for i in 0..<maxTimes {
+                // Cập nhật token trước mỗi lần gửi request trong vòng lặp
+                guard let token = await auth.refreshAccessTokenIfNeeded() else { break }
                 
-                var statusCode = (response as? HTTPURLResponse)?.statusCode ?? 500
+                var targetDateStr: String = selectedDateStr
                 
-                // Nếu bị lỗi 401, thử refresh token và gọi lại 1 lần
-                if statusCode == 401 {
-                    if let newToken = await auth.refreshAccessTokenIfNeeded(forceRefresh: true) {
-                        request.setValue("Bearer \(newToken)", forHTTPHeaderField: "Authorization")
-                        let (_, retryResponse) = try await URLSession.shared.data(for: request)
-                        statusCode = (retryResponse as? HTTPURLResponse)?.statusCode ?? 500
+                // Logic chọn ngày cho từng lần lặp
+                if i == 0 {
+                    // ⚡ Lần lặp đầu tiên: Dùng luôn ngày gốc, không cần chuyển đổi
+                    targetDateStr = selectedDateStr
+                } else if isRepeat && selectedTab == .lunar {
+                    print("--- 📝 BẮT ĐẦU TÍNH ÂM LỊCH LẦN LẶP THỨ \(i) ---")
+                    
+                    // Vì Âm Lịch luôn lặp theo năm, bỏ qua kiểm tra repeatUnit và chỉ dùng repeatInterval
+                    let targetLunarYear = baseYear + (i * repeatInterval)
+                    
+                    print(" ├─ Ngày Âm gốc: \(lunarBase.day)/\(lunarBase.month)/\(baseYear)")
+                    print(" ├─ Âm lịch mục tiêu: \(lunarBase.day)/\(lunarBase.month)/\(targetLunarYear)")
+                    
+                    // Quy đổi sang Dương Lịch
+                    if let solarDate = LunarEngine.getSolarDate(day: lunarBase.day, month: lunarBase.month, year: targetLunarYear) {
+                        targetDateStr = formatter.string(from: solarDate)
+                        print(" └─ ✅ Chuyển đổi Dương Lịch thành công: \(targetDateStr)")
+                    } else {
+                        print(" └─ ❌ Lỗi: Không thể map ngày Âm \(lunarBase.day)/\(lunarBase.month)/\(targetLunarYear). Vượt khỏi giới hạn mảng TK21 hoặc lỗi tháng nhuận.")
+                        continue
                     }
+                } else if isRepeat && selectedTab == .solar {
+                    targetDateStr = calculateNextDate(dateString: selectedDateStr, interval: i * repeatInterval, unit: repeatUnit)
+                } else {
+                    targetDateStr = selectedDateStr
                 }
                 
-                if (200...299).contains(statusCode) {
-                    if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any], let newItemId = json["id"] as? String {
-                        let newItem = CalendarItem(id: newItemId, title: newTitle, description: newDesc.isEmpty ? nil : newDesc, type: isTask ? .task : .event, isCompleted: false, dateString: targetDateStr)
-                        await MainActor.run {
-                            if let dayIndex = self.days.firstIndex(where: { $0.dateString == targetDateStr }) {
-                                self.days[dayIndex].items.append(newItem)
+                // 3. Chuẩn bị request[cite: 1]
+                let urlString = isTask
+                    ? "https://tasks.googleapis.com/tasks/v1/lists/@default/tasks"
+                    : "https://www.googleapis.com/calendar/v3/calendars/primary/events"
+                
+                guard let url = URL(string: urlString) else { continue }
+                
+                var request = URLRequest(url: url)
+                request.httpMethod = "POST"
+                request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                
+                let body: [String: Any] = isTask ? [
+                    "title": newTitle,
+                    "notes": newDesc,
+                    "due": "\(targetDateStr)T00:00:00.000Z"
+                ] : [
+                    "summary": newTitle,
+                    "description": newDesc,
+                    "start": ["date": targetDateStr],
+                    "end": ["date": targetDateStr]
+                ]
+                
+                // 4. Thực hiện request và xử lý lỗi 401 (retry 1 lần)[cite: 1]
+                do {
+                    request.httpBody = try JSONSerialization.data(withJSONObject: body)
+                    let (data, response) = try await URLSession.shared.data(for: request)
+                    
+                    var statusCode = (response as? HTTPURLResponse)?.statusCode ?? 500
+                    
+                    // Nếu bị lỗi 401, thử refresh token và gọi lại 1 lần
+                    if statusCode == 401 {
+                        if let newToken = await auth.refreshAccessTokenIfNeeded(forceRefresh: true) {
+                            request.setValue("Bearer \(newToken)", forHTTPHeaderField: "Authorization")
+                            let (_, retryResponse) = try await URLSession.shared.data(for: request)
+                            statusCode = (retryResponse as? HTTPURLResponse)?.statusCode ?? 500
+                        }
+                    }
+                    
+                    if (200...299).contains(statusCode) {
+                        if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any], let newItemId = json["id"] as? String {
+                            let newItem = CalendarItem(id: newItemId, title: newTitle, description: newDesc.isEmpty ? nil : newDesc, type: isTask ? .task : .event, isCompleted: false, dateString: targetDateStr)
+                            await MainActor.run {
+                                if let dayIndex = self.days.firstIndex(where: { $0.dateString == targetDateStr }) {
+                                    self.days[dayIndex].items.append(newItem)
+                                }
                             }
                         }
                     }
+                } catch {
+                    print("Lỗi tạo task: \(error)")
                 }
-            } catch {
-                print("Lỗi tạo task: \(error)")
             }
         }
-    }
     
     // MARK: - Gửi Request Cập Nhật (PATCH)
     func submitEditItem() async {

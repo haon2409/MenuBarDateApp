@@ -69,16 +69,20 @@ class LunarEngine {
         return ly
     }
     
-    // Lấy thông tin năm[cite: 2]
     static func getYearInfo(yyyy: Int) -> [LunarDate] {
-        let yearCode: Int
-        if yyyy >= 2000 && yyyy < 2100 {
-            yearCode = TK21[yyyy - 2000]
-        } else {
-            return [] // Lược giản: Chỉ hỗ trợ năm 2000 - 2099 cho Menu Bar hiện tại
+        let index = yyyy - 2000
+        // Debug: Kiểm tra xem index có nằm trong phạm vi mảng không
+        print("DEBUG: Lấy dữ liệu cho năm \(yyyy), index: \(index)")
+        
+        guard index >= 0 && index < TK21.count else {
+            print("LỖI: Năm \(yyyy) nằm ngoài phạm vi dữ liệu!")
+            return []
         }
+        
+        let yearCode = TK21[index]
         return decodeLunarYear(yy: yyyy, k: yearCode)
     }
+    
     
     // Tìm ngày âm[cite: 2]
     static func findLunarDate(jd: Int, ly: [LunarDate]) -> LunarDate {
@@ -101,34 +105,57 @@ class LunarEngine {
         return findLunarDate(jd: jd, ly: ly)
     }
     
-    static func getSolarDate(day: Int, month: Int, year: Int) -> Date? {
-        let ly = getYearInfo(yyyy: year)
+    static func jdnToSolarDate(jd: Int) -> (day: Int, month: Int, year: Int) {
+        let Z: Int = jd
+        var A: Int
+        if Z < 2299161 {
+            A = Z
+        } else {
+            let zDouble = Double(Z)
+            let alphaDouble = (zDouble - 1867216.25) / 36524.25
+            let alpha = Int(alphaDouble)
+            A = Z + 1 + alpha - (alpha / 4)
+        }
+        let B: Int = A + 1524
+        let bDouble = Double(B)
+        let cDouble = (bDouble - 122.1) / 365.25
+        let C: Int = Int(cDouble)
+        let dDouble = 365.25 * Double(C)
+        let D: Int = Int(dDouble)
+        let bdDouble = Double(B - D)
+        let eDouble = bdDouble / 30.6001
+        let E: Int = Int(eDouble)
         
-        // Tìm đúng tháng trong năm mục tiêu (lưu ý: tháng nhuận sẽ có leap = 1,
-        // nếu bạn muốn lặp ngày không nhuận thì leap phải là 0)
-        guard let monthData = ly.first(where: { $0.month == month && $0.leap == 0 }) else {
+        let product: Double = 30.6001 * Double(E)
+        let intProduct: Int = Int(product)
+        let dd: Int = (B - D) - intProduct
+        
+        let mm: Int = (E < 14) ? (E - 1) : (E - 13)
+        let yyyy: Int = (mm < 3) ? (C - 4715) : (C - 4716)
+        
+        return (dd, mm, yyyy)
+    }
+    
+    static func getSolarDate(day: Int, month: Int, year: Int, leap: Int = 0) -> Date? {
+        let ly = getYearInfo(yyyy: year)
+        print("DEBUG: Tháng 7 năm \(year) có JD là: \(ly.first(where: { $0.month == 7 })?.jd ?? 0)")
+        
+        guard let monthData = ly.first(where: { $0.month == month && $0.leap == leap }) else {
             return nil
         }
         
-        // Julian Day của ngày âm lịch mong muốn
         let targetJD = monthData.jd + (day - 1)
         
-        // Chuyển đổi JD sang Date
-        let l = targetJD + 68569
-        let n = (4 * l) / 146097
-        let l2 = l - (146097 * n + 3) / 4
-        let i = (4000 * (l2 + 1)) / 1461001
-        let l3 = l2 - (1461 * i) / 4 + 31
-        let j = (80 * l3) / 2447
-        let d = l3 - (2447 * j) / 8
-        let l4 = j / 11
-        let m = j + 2 - (12 * l4)
-        let y = 100 * (n - 49) + i + l4
+        // Sử dụng hàm jdnToSolarDate đã viết ở bước trước để lấy day, month, year
+        let solar = jdnToSolarDate(jd: targetJD)
         
+        // Chuyển đổi sang Date để phù hợp với kiểu trả về mong đợi của ViewModel
         var components = DateComponents()
-        components.year = y
-        components.month = m
-        components.day = d
+        components.year = solar.year
+        components.month = solar.month
+        components.day = solar.day
+        components.timeZone = TimeZone.current
+        
         return Calendar.current.date(from: components)
     }
 }

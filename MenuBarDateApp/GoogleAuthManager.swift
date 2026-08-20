@@ -173,7 +173,6 @@ final class GoogleAuthManager: NSObject, ObservableObject {
     
     func fetchProfileImageURL() async -> URL? {
         guard let token = accessToken else {
-            print("⚠️ [GoogleAuth] Lỗi: Không có access token để lấy avatar.")
             return nil
         }
         
@@ -183,22 +182,13 @@ final class GoogleAuthManager: NSObject, ObservableObject {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            
-            // Log thêm HTTP Status để dễ theo dõi
-            if let httpResponse = response as? HTTPURLResponse {
-                print("🌐 [GoogleAuth] UserInfo API Status: \(httpResponse.statusCode)")
-            }
+            let (data, _) = try await URLSession.shared.data(for: request)
             
             let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
             
             // Lấy trực tiếp trường "picture"
             if let urlString = json?["picture"] as? String {
-                print("✅ [GoogleAuth] Lấy URL Avatar thành công: \(urlString)")
                 return URL(string: urlString)
-            } else {
-                print("⚠️ [GoogleAuth] JSON không chứa trường 'picture'. Dữ liệu trả về:")
-                print(String(data: data, encoding: .utf8) ?? "Không thể đọc data")
             }
         } catch {
             print("❌ [GoogleAuth] Error fetching profile image: \(error)")

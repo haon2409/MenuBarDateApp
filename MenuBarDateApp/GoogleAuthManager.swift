@@ -172,22 +172,36 @@ final class GoogleAuthManager: NSObject, ObservableObject {
     }
     
     func fetchProfileImageURL() async -> URL? {
-        guard let token = accessToken else { return nil }
+        guard let token = accessToken else {
+            print("⚠️ [GoogleAuth] Lỗi: Không có access token để lấy avatar.")
+            return nil
+        }
         
-        // API lấy thông tin profile người dùng
-        let url = URL(string: "https://people.googleapis.com/v1/people/me?personFields=photos")!
+        // Đổi sang UserInfo endpoint
+        let url = URL(string: "https://www.googleapis.com/oauth2/v1/userinfo")!
         var request = URLRequest(url: url)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         
         do {
-            let (data, _) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await URLSession.shared.data(for: request)
+            
+            // Log thêm HTTP Status để dễ theo dõi
+            if let httpResponse = response as? HTTPURLResponse {
+                print("🌐 [GoogleAuth] UserInfo API Status: \(httpResponse.statusCode)")
+            }
+            
             let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-            if let photos = json?["photos"] as? [[String: Any]],
-               let urlString = photos.first?["url"] as? String {
+            
+            // Lấy trực tiếp trường "picture"
+            if let urlString = json?["picture"] as? String {
+                print("✅ [GoogleAuth] Lấy URL Avatar thành công: \(urlString)")
                 return URL(string: urlString)
+            } else {
+                print("⚠️ [GoogleAuth] JSON không chứa trường 'picture'. Dữ liệu trả về:")
+                print(String(data: data, encoding: .utf8) ?? "Không thể đọc data")
             }
         } catch {
-            print("Error fetching profile image: \(error)")
+            print("❌ [GoogleAuth] Error fetching profile image: \(error)")
         }
         return nil
     }

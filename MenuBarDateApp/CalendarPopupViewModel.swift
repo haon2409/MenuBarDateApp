@@ -62,29 +62,41 @@ final class CalendarPopupViewModel: ObservableObject {
         isLoggedIn = auth.isLoggedIn
     }
     
+    // MARK: - Hàm onPopupAppear
     func onPopupAppear() {
         currentDate = Date()
         generateCalendarGrid()
         if isLoggedIn {
             Task {
-                // Thêm dòng này để lấy lại avatar khi mở app
-                let imageUrl = await auth.fetchProfileImageURL()
-                await MainActor.run { self.profileImageUrl = imageUrl }
-
+                // Thay vì tự fetch URL, hãy gọi hàm dưới đây để lấy cả URL và chuyển thành NSImage
+                await fetchAndLoadImage()
                 await fetchDataFromGoogle()
             }
         }
     }
     
+    // MARK: - Hàm fetchAndLoadImage
     func fetchAndLoadImage() async {
-        guard let url = await auth.fetchProfileImageURL() else { return }
+        print("⏳ [ViewModel] Đang request URL Avatar từ GoogleAuth...")
+        guard let url = await auth.fetchProfileImageURL() else {
+            print("❌ [ViewModel] URL Avatar trả về nil, dừng tải ảnh.")
+            return
+        }
+        
+        print("⏳ [ViewModel] Bắt đầu tải data ảnh từ: \(url.absoluteString)")
         do {
             let (data, _) = try await URLSession.shared.data(from: url)
             if let image = NSImage(data: data) {
-                await MainActor.run { self.profileImage = image }
+                await MainActor.run {
+                    self.profileImageUrl = url // Có thể lưu lại URL nếu cần dùng sau này
+                    self.profileImage = image
+                    print("✅ [ViewModel] Convert data sang NSImage thành công và đã cập nhật UI!")
+                }
+            } else {
+                print("❌ [ViewModel] Lỗi: Data tải về không thể khởi tạo thành NSImage.")
             }
         } catch {
-            print("Lỗi tải data ảnh: \(error)")
+            print("❌ [ViewModel] Lỗi tải data ảnh từ URLSession: \(error)")
         }
     }
     

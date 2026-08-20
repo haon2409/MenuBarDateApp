@@ -393,24 +393,61 @@ final class CalendarPopupViewModel: ObservableObject {
         return dateString
     }
     
+    // Hàm hỗ trợ tìm ngày Dương lịch cho một ngày Âm lịch trong năm cụ thể
+    private func getSolarDateFromLunar(lunarDay: Int, lunarMonth: Int, year: Int) -> Date? {
+        // Giả định LunarEngine có phương thức chuyển đổi ngược
+        // Bạn cần kiểm tra API của LunarEngine để gọi hàm tương ứng
+        return LunarEngine.getSolarDate(day: lunarDay, month: lunarMonth, year: year)
+    }
+    
     // MARK: - Gửi Request Thêm Mới (POST)
     func submitAddItem() async {
-        guard let token = await auth.refreshAccessTokenIfNeeded() else { return }
-        
+        // 1. Lấy thông tin cơ bản
         let isTask = isTaskMode
         let newTitle = modalTitle.isEmpty ? "(Không có tiêu đề)" : modalTitle
         let newDesc = modalDesc
+        let maxTimes = (isRepeat) ? max(1, min(Int(repeatTimes) ?? 1, 100)) : 1
         
-        let maxTimes = (isTask && isRepeat) ? max(1, min(Int(repeatTimes) ?? 3, 100)) : 1
-        var currentIteratorDateStr = selectedDateStr
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        guard let baseDate = formatter.date(from: selectedDateStr) else { return }
+        
+        let calendar = Calendar.current
+        let baseYear = calendar.component(.year, from: baseDate)
+        
+        // Tính ngày Âm gốc
+        let lunarBase = LunarEngine.getLunarDate(
+            dd: calendar.component(.day, from: baseDate),
+            mm: calendar.component(.month, from: baseDate),
+            yyyy: baseYear
+        )
         
         await MainActor.run { self.showAddModal = false }
         
-        for _ in 0..<maxTimes {
-            let targetDate = currentIteratorDateStr
+        // 2. Vòng lặp tạo Task
+        for i in 0..<maxTimes {
+            // Cập nhật token trước mỗi lần gửi request trong vòng lặp
+            guard let token = await auth.refreshAccessTokenIfNeeded() else { break }
+            
+            let targetDateStr: String
+            
+            // Logic chọn ngày cho từng lần lặp
+            if isRepeat && selectedTab == .lunar {
+                let targetYear = baseYear + i
+                if let solarDate = LunarEngine.getSolarDate(day: lunarBase.day, month: lunarBase.month, year: targetYear) {
+                    targetDateStr = formatter.string(from: solarDate)
+                } else { continue }
+            } else if isRepeat && selectedTab == .solar {
+                targetDateStr = calculateNextDate(dateString: selectedDateStr, interval: i * repeatInterval, unit: repeatUnit)
+            } else {
+                targetDateStr = selectedDateStr
+            }
+            
+            // 3. Chuẩn bị request
             let urlString = isTask
                 ? "https://tasks.googleapis.com/tasks/v1/lists/@default/tasks"
                 : "https://www.googleapis.com/calendar/v3/calendars/primary/events"
+            
             guard let url = URL(string: urlString) else { continue }
             
             var request = URLRequest(url: url)
@@ -418,44 +455,45 @@ final class CalendarPopupViewModel: ObservableObject {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             
-            var body: [String: Any] = [:]
-            if isTask {
-                body = [
-                    "title": newTitle,
-                    "notes": newDesc,
-                    "due": "\(targetDate)T00:00:00.000Z"
-                ]
-            } else {
-                body = [
-                    "summary": newTitle,
-                    "description": newDesc,
-                    "start": ["date": targetDate],
-                    "end": ["date": targetDate]
-                ]
-            }
+            let body: [String: Any] = isTask ? [
+                "title": newTitle,
+                "notes": newDesc,
+                "due": "\(targetDateStr)T00:00:00.000Z"
+            ] : [
+                "summary": newTitle,
+                "description": newDesc,
+                "start": ["date": targetDateStr],
+                "end": ["date": targetDateStr]
+            ]
             
+            // 4. Thực hiện request và xử lý lỗi 401 (retry 1 lần)
             do {
                 request.httpBody = try JSONSerialization.data(withJSONObject: body)
                 let (data, response) = try await URLSession.shared.data(for: request)
-                if let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) {
+                
+                var statusCode = (response as? HTTPURLResponse)?.statusCode ?? 500
+                
+                // Nếu bị lỗi 401, thử refresh token và gọi lại 1 lần
+                if statusCode == 401 {
+                    if let newToken = await auth.refreshAccessTokenIfNeeded(forceRefresh: true) {
+                        request.setValue("Bearer \(newToken)", forHTTPHeaderField: "Authorization")
+                        let (_, retryResponse) = try await URLSession.shared.data(for: request)
+                        statusCode = (retryResponse as? HTTPURLResponse)?.statusCode ?? 500
+                    }
+                }
+                
+                if (200...299).contains(statusCode) {
                     if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any], let newItemId = json["id"] as? String {
-                        let newItem = CalendarItem(id: newItemId, title: newTitle, description: newDesc.isEmpty ? nil : newDesc, type: isTask ? .task : .event, isCompleted: false, dateString: targetDate)
-                        
+                        let newItem = CalendarItem(id: newItemId, title: newTitle, description: newDesc.isEmpty ? nil : newDesc, type: isTask ? .task : .event, isCompleted: false, dateString: targetDateStr)
                         await MainActor.run {
-                            if let dayIndex = self.days.firstIndex(where: { $0.dateString == targetDate }) {
+                            if let dayIndex = self.days.firstIndex(where: { $0.dateString == targetDateStr }) {
                                 self.days[dayIndex].items.append(newItem)
                             }
                         }
                     }
-                } else {
-                    await fetchDataFromGoogle()
                 }
             } catch {
-                await fetchDataFromGoogle()
-            }
-            
-            if isTask && isRepeat {
-                currentIteratorDateStr = calculateNextDate(dateString: currentIteratorDateStr, interval: repeatInterval, unit: repeatUnit)
+                print("Lỗi tạo task: \(error)")
             }
         }
     }

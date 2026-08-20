@@ -100,4 +100,35 @@ class LunarEngine {
         }
         return findLunarDate(jd: jd, ly: ly)
     }
+    
+    static func getSolarDate(day: Int, month: Int, year: Int) -> Date? {
+        let ly = getYearInfo(yyyy: year)
+        
+        // Tìm đúng tháng trong năm mục tiêu (lưu ý: tháng nhuận sẽ có leap = 1,
+        // nếu bạn muốn lặp ngày không nhuận thì leap phải là 0)
+        guard let monthData = ly.first(where: { $0.month == month && $0.leap == 0 }) else {
+            return nil
+        }
+        
+        // Julian Day của ngày âm lịch mong muốn
+        let targetJD = monthData.jd + (day - 1)
+        
+        // Chuyển đổi JD sang Date
+        let l = targetJD + 68569
+        let n = (4 * l) / 146097
+        let l2 = l - (146097 * n + 3) / 4
+        let i = (4000 * (l2 + 1)) / 1461001
+        let l3 = l2 - (1461 * i) / 4 + 31
+        let j = (80 * l3) / 2447
+        let d = l3 - (2447 * j) / 8
+        let l4 = j / 11
+        let m = j + 2 - (12 * l4)
+        let y = 100 * (n - 49) + i + l4
+        
+        var components = DateComponents()
+        components.year = y
+        components.month = m
+        components.day = d
+        return Calendar.current.date(from: components)
+    }
 }

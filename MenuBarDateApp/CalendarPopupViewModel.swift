@@ -2,6 +2,11 @@ import Foundation
 import SwiftUI
 import Combine
 
+enum CalendarTab: String {
+    case solar = "Dương Lịch"
+    case lunar = "Âm Lịch"
+}
+
 @MainActor
 final class CalendarPopupViewModel: ObservableObject {
     @Published var currentDate: Date = Date()
@@ -27,6 +32,8 @@ final class CalendarPopupViewModel: ObservableObject {
     @Published var repeatTimes: String = "3"
     
     @Published var isLoading: Bool = false // Biến trạng thái loading mới
+    
+    @Published var selectedTab: CalendarTab = .solar
     
     private let calendar = Calendar.current
     private let auth = GoogleAuthManager.shared
@@ -358,6 +365,9 @@ final class CalendarPopupViewModel: ObservableObject {
         self.repeatInterval = 1
         self.repeatUnit = "days"
         self.repeatTimes = "3"
+        
+        // Reset tab về Dương Lịch khi mở modal mới
+        self.selectedTab = .solar
         
         self.showAddModal = true
     }

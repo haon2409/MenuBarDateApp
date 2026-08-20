@@ -227,7 +227,8 @@ final class CalendarPopupViewModel: ObservableObject {
             auth.logout()
             isLoggedIn = false
             profileImage = nil
-        } else {
+        } else {            
+            NSApp.keyWindow?.orderOut(nil)
             auth.login()
             Task {
                 // Đợi đăng nhập

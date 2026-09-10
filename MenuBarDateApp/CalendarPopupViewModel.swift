@@ -34,7 +34,7 @@ final class CalendarPopupViewModel: ObservableObject {
     @Published var repeatUnit: String = "days" // "days", "weeks", "months", "years"
     @Published var repeatTimes: String = "3"
     
-    @Published var isLoading: Bool = false // Biến trạng thái loading mới
+    @Published var isLoading: Bool = false // Biến trạng thái loading
     
     @Published var selectedTab: CalendarTab = .solar
     
@@ -61,13 +61,21 @@ final class CalendarPopupViewModel: ObservableObject {
         isLoggedIn = auth.isLoggedIn
     }
     
+    // MARK: - Helper xử lý khi token chết
+    private func handleAuthFailure() {
+        auth.logout()
+        isLoggedIn = false
+        profileImage = nil
+        // Có thể thêm notification/alert ở đây nếu muốn
+        FileLogger.shared.logError(context: "handleAuthFailure", message: "Phiên đăng nhập hết hạn → đã logout tự động")
+    }
+    
     // MARK: - Hàm onPopupAppear
     func onPopupAppear() {
         currentDate = Date()
         generateCalendarGrid()
         if isLoggedIn {
             Task {
-                // Thay vì tự fetch URL, hãy gọi hàm dưới đây để lấy cả URL và chuyển thành NSImage
                 await fetchAndLoadImage()
                 await fetchDataFromGoogle()
             }
@@ -80,12 +88,12 @@ final class CalendarPopupViewModel: ObservableObject {
             let (data, _) = try await URLSession.shared.data(from: url)
             if let image = NSImage(data: data) {
                 await MainActor.run {
-                    // Chỉ cần gán ảnh, xoá dòng gán self.profileImageUrl = url (nếu đang có)
                     self.profileImage = image
                 }
             }
         } catch {
             print("Lỗi tải data ảnh: \(error)")
+            FileLogger.shared.logError(context: "fetchAndLoadImage", message: "Lỗi tải data ảnh: \(error.localizedDescription)")
         }
     }
     
@@ -96,15 +104,13 @@ final class CalendarPopupViewModel: ObservableObject {
         return formatter.string(from: currentDate)
     }
     
-    // MARK: - Set Tháng / Năm từ Picker (có guard chống gọi trùng)
-    /// Đổi tháng, giữ nguyên năm + clamp ngày hợp lệ
+    // MARK: - Set Tháng / Năm từ Picker
     func setMonth(_ month: Int) {
         guard (1...12).contains(month), month != currentMonth else { return }
         
         var components = calendar.dateComponents([.year, .month, .day], from: currentDate)
         components.month = month
         
-        // Clamp ngày nếu tháng mới có ít ngày hơn
         if let year = components.year,
            let day = components.day,
            let firstOfMonth = calendar.date(from: DateComponents(year: year, month: month, day: 1)),
@@ -118,14 +124,12 @@ final class CalendarPopupViewModel: ObservableObject {
         if isLoggedIn { Task { await fetchDataFromGoogle() } }
     }
     
-    /// Đổi năm, giữ nguyên tháng + clamp ngày hợp lệ
     func setYear(_ year: Int) {
         guard yearRange.contains(year), year != currentYear else { return }
         
         var components = calendar.dateComponents([.year, .month, .day], from: currentDate)
         components.year = year
         
-        // Clamp ngày nếu tháng 2 năm nhuận/không nhuận
         if let month = components.month,
            let day = components.day,
            let firstOfMonth = calendar.date(from: DateComponents(year: year, month: month, day: 1)),
@@ -148,7 +152,6 @@ final class CalendarPopupViewModel: ObservableObject {
     }
     
     func goToToday() {
-        // Chỉ cập nhật nếu không phải tháng hiện tại
         guard !calendar.isDate(currentDate, equalTo: Date(), toGranularity: .month) else { return }
         currentDate = Date()
         generateCalendarGrid()
@@ -166,7 +169,7 @@ final class CalendarPopupViewModel: ObservableObject {
               let range = calendar.range(of: .day, in: .month, for: firstDayOfMonth) else { return }
         
         let daysInMonth = range.count
-        var firstWeekday = calendar.component(.weekday, from: firstDayOfMonth)
+        let firstWeekday = calendar.component(.weekday, from: firstDayOfMonth)
         let startOffset = firstWeekday == 1 ? 6 : firstWeekday - 2
         
         if startOffset > 0 {
@@ -227,11 +230,10 @@ final class CalendarPopupViewModel: ObservableObject {
             auth.logout()
             isLoggedIn = false
             profileImage = nil
-        } else {            
+        } else {
             NSApp.keyWindow?.orderOut(nil)
             auth.login()
             Task {
-                // Đợi đăng nhập
                 for _ in 0..<60 {
                     try? await Task.sleep(nanoseconds: 500_000_000)
                     if auth.isLoggedIn {
@@ -247,16 +249,21 @@ final class CalendarPopupViewModel: ObservableObject {
     
     // MARK: - Fetch Google Data
     func fetchDataFromGoogle(isRetry: Bool = false) async {
-        isLoading = true // Bật trạng thái tải
-        defer { isLoading = false } // Đảm bảo luôn tắt khi kết thúc hàm
+        isLoading = true
+        defer { isLoading = false }
         
-        guard let token = await auth.refreshAccessTokenIfNeeded(forceRefresh: isRetry) else { return }
+        guard let token = await auth.refreshAccessTokenIfNeeded(forceRefresh: isRetry) else {
+            FileLogger.shared.logError(context: "fetchDataFromGoogle", message: "Không lấy được access token từ refreshAccessTokenIfNeeded (isRetry: \(isRetry))")
+            await MainActor.run { handleAuthFailure() }
+            return
+        }
         for i in days.indices { days[i].items.removeAll() }
         
         let eventsSuccess = await fetchCalendarEvents(token: token)
         let tasksSuccess = await fetchTasks(token: token)
         
         if (!eventsSuccess || !tasksSuccess) && !isRetry {
+            FileLogger.shared.logError(context: "fetchDataFromGoogle", message: "Fetch thất bại (eventsSuccess: \(eventsSuccess), tasksSuccess: \(tasksSuccess)), tiến hành thử lại...")
             await fetchDataFromGoogle(isRetry: true)
             return
         }
@@ -289,8 +296,14 @@ final class CalendarPopupViewModel: ObservableObject {
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
             if let httpResponse = response as? HTTPURLResponse {
-                if httpResponse.statusCode == 401 { return false }
-                if httpResponse.statusCode != 200 { return true }
+                if httpResponse.statusCode == 401 {
+                    FileLogger.shared.logError(context: "fetchCalendarEvents", message: "HTTP Status 401 Unauthorized")
+                    return false
+                }
+                if httpResponse.statusCode != 200 {
+                    FileLogger.shared.logError(context: "fetchCalendarEvents", message: "HTTP Status \(httpResponse.statusCode)")
+                    return true
+                }
             }
             if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any], let items = json["items"] as? [[String: Any]] {
                 for item in items {
@@ -302,11 +315,25 @@ final class CalendarPopupViewModel: ObservableObject {
                         else { continue }
                     } else { continue }
                     
-                    let calendarItem = CalendarItem(id: item["id"] as? String ?? UUID().uuidString, title: summary, description: item["description"] as? String, type: .event, dateString: dateStr)
-                    if let index = days.firstIndex(where: { $0.dateString == dateStr }) { days[index].items.append(calendarItem) }
+                    let calendarItem = CalendarItem(
+                        id: item["id"] as? String ?? UUID().uuidString,
+                        title: summary,
+                        description: item["description"] as? String,
+                        type: .event,
+                        dateString: dateStr
+                    )
+
+                    if let index = days.firstIndex(where: { $0.dateString == dateStr }) {
+                        // Chỉ thêm nếu chưa tồn tại id này
+                        if !days[index].items.contains(where: { $0.id == calendarItem.id }) {
+                            days[index].items.append(calendarItem)
+                        }
+                    }
                 }
             }
-        } catch { }
+        } catch {
+            FileLogger.shared.logError(context: "fetchCalendarEvents", message: error.localizedDescription)
+        }
         return true
     }
 
@@ -334,20 +361,40 @@ final class CalendarPopupViewModel: ObservableObject {
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
             if let httpResponse = response as? HTTPURLResponse {
-                if httpResponse.statusCode == 401 { return false }
-                if httpResponse.statusCode != 200 { return true }
+                if httpResponse.statusCode == 401 {
+                    FileLogger.shared.logError(context: "fetchTasks", message: "HTTP Status 401 Unauthorized")
+                    return false
+                }
+                if httpResponse.statusCode != 200 {
+                    FileLogger.shared.logError(context: "fetchTasks", message: "HTTP Status \(httpResponse.statusCode)")
+                    return true
+                }
             }
             if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any], let tasks = json["items"] as? [[String: Any]] {
                 for task in tasks {
                     guard let title = task["title"] as? String, let due = task["due"] as? String else { continue }
                     let dateStr = String(due.prefix(10))
                     if let index = days.firstIndex(where: { $0.dateString == dateStr }) {
-                        let calendarItem = CalendarItem(id: task["id"] as? String ?? UUID().uuidString, title: title, description: task["notes"] as? String, type: .task, isCompleted: (task["status"] as? String) == "completed", dateString: dateStr)
-                        days[index].items.append(calendarItem)
+                        let calendarItem = CalendarItem(
+                            id: task["id"] as? String ?? UUID().uuidString,
+                            title: title,
+                            description: task["notes"] as? String,
+                            type: .task,
+                            isCompleted: (task["status"] as? String) == "completed",
+                            dateString: dateStr
+                        )
+
+                        if let index = days.firstIndex(where: { $0.dateString == dateStr }) {
+                            if !days[index].items.contains(where: { $0.id == calendarItem.id }) {
+                                days[index].items.append(calendarItem)
+                            }
+                        }
                     }
                 }
             }
-        } catch { }
+        } catch {
+            FileLogger.shared.logError(context: "fetchTasks", message: error.localizedDescription)
+        }
         return true
     }
     
@@ -357,7 +404,11 @@ final class CalendarPopupViewModel: ObservableObject {
     
     // MARK: - Thao tác Dữ liệu
     func deleteItem(_ item: CalendarItem) async {
-        guard let token = await auth.refreshAccessTokenIfNeeded() else { return }
+        guard let token = await auth.refreshAccessTokenIfNeeded() else {
+            FileLogger.shared.logError(context: "deleteItem", message: "Không thể refresh access token")
+            await MainActor.run { handleAuthFailure() }
+            return
+        }
         let urlString = item.type == .event ? "https://www.googleapis.com/calendar/v3/calendars/primary/events/\(item.id)" : "https://tasks.googleapis.com/tasks/v1/lists/@default/tasks/\(item.id)"
         guard let url = URL(string: urlString) else { return }
         var request = URLRequest(url: url)
@@ -366,14 +417,23 @@ final class CalendarPopupViewModel: ObservableObject {
         
         do {
             let (_, response) = try await URLSession.shared.data(for: request)
-            if let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) {
-                await MainActor.run {
-                    if let dayIndex = days.firstIndex(where: { $0.dateString == item.dateString }) {
-                        days[dayIndex].items.removeAll(where: { $0.id == item.id })
+            if let httpResponse = response as? HTTPURLResponse {
+                if (200...299).contains(httpResponse.statusCode) {
+                    await MainActor.run {
+                        if let dayIndex = days.firstIndex(where: { $0.dateString == item.dateString }) {
+                            days[dayIndex].items.removeAll(where: { $0.id == item.id })
+                        }
                     }
+                } else if httpResponse.statusCode == 401 {
+                    FileLogger.shared.logError(context: "deleteItem", message: "HTTP 401 → logout")
+                    await MainActor.run { handleAuthFailure() }
+                } else {
+                    FileLogger.shared.logError(context: "deleteItem", message: "HTTP Status \(httpResponse.statusCode)")
                 }
             }
-        } catch { }
+        } catch {
+            FileLogger.shared.logError(context: "deleteItem", message: error.localizedDescription)
+        }
     }
 
     func toggleTaskStatus(_ item: CalendarItem) async {
@@ -383,7 +443,12 @@ final class CalendarPopupViewModel: ObservableObject {
                 days[dayIndex].items[itemIndex].isCompleted.toggle()
             }
         }
-        guard let token = await auth.refreshAccessTokenIfNeeded() else { await rollbackStatus(item); return }
+        guard let token = await auth.refreshAccessTokenIfNeeded() else {
+            FileLogger.shared.logError(context: "toggleTaskStatus", message: "Không thể refresh access token")
+            await rollbackStatus(item)
+            await MainActor.run { handleAuthFailure() }
+            return
+        }
         
         let newStatus = !item.isCompleted ? "completed" : "needsAction"
         let urlString = "https://tasks.googleapis.com/tasks/v1/lists/@default/tasks/\(item.id)"
@@ -408,14 +473,31 @@ final class CalendarPopupViewModel: ObservableObject {
             let (_, response) = try await URLSession.shared.data(for: request)
             if let httpResponse = response as? HTTPURLResponse {
                 if httpResponse.statusCode == 401 {
+                    FileLogger.shared.logError(context: "toggleTaskStatus", message: "HTTP 401 Unauthorized, thử refresh token...")
                     if let newToken = await auth.refreshAccessTokenIfNeeded(forceRefresh: true) {
                         request.setValue("Bearer \(newToken)", forHTTPHeaderField: "Authorization")
                         let (_, retryResponse) = try await URLSession.shared.data(for: request)
-                        if let retryHttp = retryResponse as? HTTPURLResponse, !(200...299).contains(retryHttp.statusCode) { await rollbackStatus(item) }
-                    } else { await rollbackStatus(item) }
-                } else if !(200...299).contains(httpResponse.statusCode) { await rollbackStatus(item) }
+                        if let retryHttp = retryResponse as? HTTPURLResponse, !(200...299).contains(retryHttp.statusCode) {
+                            FileLogger.shared.logError(context: "toggleTaskStatus", message: "Retry HTTP Status \(retryHttp.statusCode)")
+                            await rollbackStatus(item)
+                            if retryHttp.statusCode == 401 {
+                                await MainActor.run { handleAuthFailure() }
+                            }
+                        }
+                    } else {
+                        FileLogger.shared.logError(context: "toggleTaskStatus", message: "Không thể force refresh token")
+                        await rollbackStatus(item)
+                        await MainActor.run { handleAuthFailure() }
+                    }
+                } else if !(200...299).contains(httpResponse.statusCode) {
+                    FileLogger.shared.logError(context: "toggleTaskStatus", message: "HTTP Status \(httpResponse.statusCode)")
+                    await rollbackStatus(item)
+                }
             }
-        } catch { await rollbackStatus(item) }
+        } catch {
+            FileLogger.shared.logError(context: "toggleTaskStatus", message: error.localizedDescription)
+            await rollbackStatus(item)
+        }
     }
 
     private func rollbackStatus(_ item: CalendarItem) async {
@@ -450,7 +532,6 @@ final class CalendarPopupViewModel: ObservableObject {
         self.repeatUnit = "days"
         self.repeatTimes = "3"
         
-        // Reset tab về Dương Lịch khi mở modal mới
         self.selectedTab = .solar
         
         self.showAddModal = true
@@ -477,129 +558,131 @@ final class CalendarPopupViewModel: ObservableObject {
         return dateString
     }
     
-    // Hàm hỗ trợ tìm ngày Dương lịch cho một ngày Âm lịch trong năm cụ thể
     private func getSolarDateFromLunar(lunarDay: Int, lunarMonth: Int, year: Int) -> Date? {
-        // Giả định LunarEngine có phương thức chuyển đổi ngược
-        // Bạn cần kiểm tra API của LunarEngine để gọi hàm tương ứng
         return LunarEngine.getSolarDate(day: lunarDay, month: lunarMonth, year: year)
     }
     
     // MARK: - Gửi Request Thêm Mới (POST)
-        func submitAddItem() async {
-            // 1. Lấy thông tin cơ bản
-            let isTask = isTaskMode
-            let newTitle = modalTitle.isEmpty ? "(Không có tiêu đề)" : modalTitle
-            let newDesc = modalDesc
-            let maxTimes = (isRepeat) ? max(1, min(Int(repeatTimes) ?? 1, 100)) : 1
+    func submitAddItem() async {
+        let isTask = isTaskMode
+        let newTitle = modalTitle.isEmpty ? "(Không có tiêu đề)" : modalTitle
+        let newDesc = modalDesc
+        let maxTimes = (isRepeat) ? max(1, min(Int(repeatTimes) ?? 1, 100)) : 1
+        
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        guard let baseDate = formatter.date(from: selectedDateStr) else { return }
+        
+        let calendar = Calendar.current
+        let baseYear = calendar.component(.year, from: baseDate)
+        
+        let lunarBase = LunarEngine.getLunarDate(
+            dd: calendar.component(.day, from: baseDate),
+            mm: calendar.component(.month, from: baseDate),
+            yyyy: baseYear
+        )
+        
+        await MainActor.run { self.showAddModal = false }
+        
+        for i in 0..<maxTimes {
+            guard let token = await auth.refreshAccessTokenIfNeeded() else {
+                FileLogger.shared.logError(context: "submitAddItem", message: "Không thể refresh access token tại lần lặp thứ \(i)")
+                await MainActor.run { handleAuthFailure() }
+                break
+            }
             
-            let formatter = DateFormatter()
-            formatter.dateFormat = "yyyy-MM-dd"
-            guard let baseDate = formatter.date(from: selectedDateStr) else { return }
+            var targetDateStr: String = selectedDateStr
             
-            let calendar = Calendar.current
-            let baseYear = calendar.component(.year, from: baseDate)
-            
-            // Tính ngày Âm gốc
-            let lunarBase = LunarEngine.getLunarDate(
-                dd: calendar.component(.day, from: baseDate),
-                mm: calendar.component(.month, from: baseDate),
-                yyyy: baseYear
-            )
-            
-            await MainActor.run { self.showAddModal = false }
-            
-            // 2. Vòng lặp tạo Task
-            for i in 0..<maxTimes {
-                // Cập nhật token trước mỗi lần gửi request trong vòng lặp
-                guard let token = await auth.refreshAccessTokenIfNeeded() else { break }
+            if i == 0 {
+                targetDateStr = selectedDateStr
+            } else if isRepeat && selectedTab == .lunar {
+                let targetLunarYear = baseYear + (i * repeatInterval)
                 
-                var targetDateStr: String = selectedDateStr
-                
-                // Logic chọn ngày cho từng lần lặp
-                if i == 0 {
-                    // ⚡ Lần lặp đầu tiên: Dùng luôn ngày gốc, không cần chuyển đổi
-                    targetDateStr = selectedDateStr
-                } else if isRepeat && selectedTab == .lunar {
-                    print("--- 📝 BẮT ĐẦU TÍNH ÂM LỊCH LẦN LẶP THỨ \(i) ---")
-                    
-                    // Vì Âm Lịch luôn lặp theo năm, bỏ qua kiểm tra repeatUnit và chỉ dùng repeatInterval
-                    let targetLunarYear = baseYear + (i * repeatInterval)
-                    
-                    print(" ├─ Ngày Âm gốc: \(lunarBase.day)/\(lunarBase.month)/\(baseYear)")
-                    print(" ├─ Âm lịch mục tiêu: \(lunarBase.day)/\(lunarBase.month)/\(targetLunarYear)")
-                    
-                    // Quy đổi sang Dương Lịch
-                    if let solarDate = LunarEngine.getSolarDate(day: lunarBase.day, month: lunarBase.month, year: targetLunarYear) {
-                        targetDateStr = formatter.string(from: solarDate)
-                        print(" └─ ✅ Chuyển đổi Dương Lịch thành công: \(targetDateStr)")
-                    } else {
-                        print(" └─ ❌ Lỗi: Không thể map ngày Âm \(lunarBase.day)/\(lunarBase.month)/\(targetLunarYear). Vượt khỏi giới hạn mảng TK21 hoặc lỗi tháng nhuận.")
-                        continue
-                    }
-                } else if isRepeat && selectedTab == .solar {
-                    targetDateStr = calculateNextDate(dateString: selectedDateStr, interval: i * repeatInterval, unit: repeatUnit)
+                if let solarDate = LunarEngine.getSolarDate(day: lunarBase.day, month: lunarBase.month, year: targetLunarYear) {
+                    targetDateStr = formatter.string(from: solarDate)
                 } else {
-                    targetDateStr = selectedDateStr
+                    let errMsg = "Không thể map ngày Âm \(lunarBase.day)/\(lunarBase.month)/\(targetLunarYear)"
+                    FileLogger.shared.logError(context: "submitAddItem", message: errMsg)
+                    continue
+                }
+            } else if isRepeat && selectedTab == .solar {
+                targetDateStr = calculateNextDate(dateString: selectedDateStr, interval: i * repeatInterval, unit: repeatUnit)
+            } else {
+                targetDateStr = selectedDateStr
+            }
+            
+            let urlString = isTask
+                ? "https://tasks.googleapis.com/tasks/v1/lists/@default/tasks"
+                : "https://www.googleapis.com/calendar/v3/calendars/primary/events"
+            
+            guard let url = URL(string: urlString) else { continue }
+            
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            
+            let body: [String: Any] = isTask ? [
+                "title": newTitle,
+                "notes": newDesc,
+                "due": "\(targetDateStr)T00:00:00.000Z"
+            ] : [
+                "summary": newTitle,
+                "description": newDesc,
+                "start": ["date": targetDateStr],
+                "end": ["date": targetDateStr]
+            ]
+            
+            do {
+                request.httpBody = try JSONSerialization.data(withJSONObject: body)
+                let (data, response) = try await URLSession.shared.data(for: request)
+                
+                var statusCode = (response as? HTTPURLResponse)?.statusCode ?? 500
+                
+                if statusCode == 401 {
+                    FileLogger.shared.logError(context: "submitAddItem", message: "HTTP 401 Unauthorized, thử force refresh token...")
+                    if let newToken = await auth.refreshAccessTokenIfNeeded(forceRefresh: true) {
+                        request.setValue("Bearer \(newToken)", forHTTPHeaderField: "Authorization")
+                        let (_, retryResponse) = try await URLSession.shared.data(for: request)
+                        statusCode = (retryResponse as? HTTPURLResponse)?.statusCode ?? 500
+                    } else {
+                        FileLogger.shared.logError(context: "submitAddItem", message: "Không thể force refresh token")
+                        await MainActor.run { handleAuthFailure() }
+                        break
+                    }
                 }
                 
-                // 3. Chuẩn bị request
-                let urlString = isTask
-                    ? "https://tasks.googleapis.com/tasks/v1/lists/@default/tasks"
-                    : "https://www.googleapis.com/calendar/v3/calendars/primary/events"
-                
-                guard let url = URL(string: urlString) else { continue }
-                
-                var request = URLRequest(url: url)
-                request.httpMethod = "POST"
-                request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                
-                let body: [String: Any] = isTask ? [
-                    "title": newTitle,
-                    "notes": newDesc,
-                    "due": "\(targetDateStr)T00:00:00.000Z"
-                ] : [
-                    "summary": newTitle,
-                    "description": newDesc,
-                    "start": ["date": targetDateStr],
-                    "end": ["date": targetDateStr]
-                ]
-                
-                // 4. Thực hiện request và xử lý lỗi 401 (retry 1 lần)
-                do {
-                    request.httpBody = try JSONSerialization.data(withJSONObject: body)
-                    let (data, response) = try await URLSession.shared.data(for: request)
-                    
-                    var statusCode = (response as? HTTPURLResponse)?.statusCode ?? 500
-                    
-                    // Nếu bị lỗi 401, thử refresh token và gọi lại 1 lần
-                    if statusCode == 401 {
-                        if let newToken = await auth.refreshAccessTokenIfNeeded(forceRefresh: true) {
-                            request.setValue("Bearer \(newToken)", forHTTPHeaderField: "Authorization")
-                            let (_, retryResponse) = try await URLSession.shared.data(for: request)
-                            statusCode = (retryResponse as? HTTPURLResponse)?.statusCode ?? 500
-                        }
-                    }
-                    
-                    if (200...299).contains(statusCode) {
-                        if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any], let newItemId = json["id"] as? String {
-                            let newItem = CalendarItem(id: newItemId, title: newTitle, description: newDesc.isEmpty ? nil : newDesc, type: isTask ? .task : .event, isCompleted: false, dateString: targetDateStr)
-                            await MainActor.run {
-                                if let dayIndex = self.days.firstIndex(where: { $0.dateString == targetDateStr }) {
-                                    self.days[dayIndex].items.append(newItem)
-                                }
+                if (200...299).contains(statusCode) {
+                    if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any], let newItemId = json["id"] as? String {
+                        let newItem = CalendarItem(id: newItemId, title: newTitle, description: newDesc.isEmpty ? nil : newDesc, type: isTask ? .task : .event, isCompleted: false, dateString: targetDateStr)
+                        await MainActor.run {
+                            if let dayIndex = self.days.firstIndex(where: { $0.dateString == targetDateStr }) {
+                                self.days[dayIndex].items.append(newItem)
                             }
                         }
                     }
-                } catch {
-                    print("Lỗi tạo task: \(error)")
+                } else {
+                    FileLogger.shared.logError(context: "submitAddItem", message: "HTTP Status \(statusCode)")
+                    if statusCode == 401 {
+                        await MainActor.run { handleAuthFailure() }
+                        break
+                    }
                 }
+            } catch {
+                print("Lỗi tạo task: \(error)")
+                FileLogger.shared.logError(context: "submitAddItem", message: "Lỗi tạo task: \(error.localizedDescription)")
             }
         }
+    }
     
     // MARK: - Gửi Request Cập Nhật (PATCH)
     func submitEditItem() async {
-        guard let id = editingItemId, let dateStr = editingItemDateStr, let token = await auth.refreshAccessTokenIfNeeded() else { return }
+        guard let id = editingItemId, let dateStr = editingItemDateStr else { return }
+        guard let token = await auth.refreshAccessTokenIfNeeded() else {
+            FileLogger.shared.logError(context: "submitEditItem", message: "Không thể refresh access token")
+            await MainActor.run { handleAuthFailure() }
+            return
+        }
         let isTask = isTaskMode
         let newTitle = modalTitle
         let newDesc = modalDesc
@@ -623,10 +706,18 @@ final class CalendarPopupViewModel: ObservableObject {
         do {
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
             let (_, response) = try await URLSession.shared.data(for: request)
-            if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
-                await fetchDataFromGoogle()
+            if let httpResponse = response as? HTTPURLResponse {
+                if !(200...299).contains(httpResponse.statusCode) {
+                    FileLogger.shared.logError(context: "submitEditItem", message: "HTTP Status \(httpResponse.statusCode)")
+                    if httpResponse.statusCode == 401 {
+                        await MainActor.run { handleAuthFailure() }
+                    } else {
+                        await fetchDataFromGoogle()
+                    }
+                }
             }
         } catch {
+            FileLogger.shared.logError(context: "submitEditItem", message: error.localizedDescription)
             await fetchDataFromGoogle()
         }
     }

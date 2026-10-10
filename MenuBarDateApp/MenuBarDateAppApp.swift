@@ -62,7 +62,7 @@ final class MenuBarViewModel: ObservableObject {
             // Nửa 1: Icon Thứ
             CalendarCardView(weekday: newWeekday)
             
-            // MARK: - Nửa 2: Thông tin chi tiết
+            // MARK: - Nửa 2: Thông tin chi tiết            
             VStack(alignment: .leading, spacing: 1) {
                 // Hàng 1: Dương lịch
                 HStack(spacing: 2) {
@@ -70,7 +70,7 @@ final class MenuBarViewModel: ObservableObject {
                         .font(.system(size: 11, weight: .semibold, design: .rounded))
                         .monospacedDigit()
                         .foregroundColor(textColor)
-                        .frame(width: 30, alignment: .leading)
+                        .frame(width: 36, alignment: .leading)   // ← tăng từ 30 → 36
                     
                     Text("\(totalDays)")
                         .font(.system(size: 8, weight: .bold, design: .monospaced))
@@ -93,7 +93,7 @@ final class MenuBarViewModel: ObservableObject {
                         .font(.system(size: 11, weight: .semibold, design: .rounded))
                         .monospacedDigit()
                         .foregroundColor(textColor.opacity(0.7))
-                        .frame(width: 30, alignment: .leading)
+                        .frame(width: 36, alignment: .leading)   // ← tăng từ 30 → 36
                     
                     Text("\(lunarTotalDays)")
                         .font(.system(size: 8, weight: .bold, design: .monospaced))
@@ -104,7 +104,7 @@ final class MenuBarViewModel: ObservableObject {
                         .clipShape(RoundedRectangle(cornerRadius: 2))
                 }
             }
-            .frame(width: 48)
+            .frame(width: 54)   // ← tăng từ 48 → 54
         }
         .fixedSize()
 

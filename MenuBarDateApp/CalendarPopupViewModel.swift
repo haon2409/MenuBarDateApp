@@ -44,6 +44,7 @@ final class CalendarPopupViewModel: ObservableObject {
     @Published private(set) var allExpenses: [String: [ExpenseItem]] = [:]
     
     private let expenseFileName = "expenses.json"
+    private var driveExpenseFileId: String? = nil
     
     private let calendar = Calendar.current
     private let auth = GoogleAuthManager.shared
@@ -82,7 +83,7 @@ final class CalendarPopupViewModel: ObservableObject {
     init() {
         generateCalendarGrid()
         isLoggedIn = auth.isLoggedIn
-        loadExpenses()
+        loadExpensesLocally()
     }
     
     // MARK: - Helper xử lý khi token chết
@@ -101,7 +102,10 @@ final class CalendarPopupViewModel: ObservableObject {
             Task {
                 await fetchAndLoadImage()
                 await fetchDataFromGoogle()
+                await syncExpensesFromDrive()
             }
+        } else {
+            loadExpensesLocally()
         }
     }
     
@@ -263,6 +267,7 @@ final class CalendarPopupViewModel: ObservableObject {
                         await MainActor.run { self.isLoggedIn = true }
                         await fetchAndLoadImage()
                         await fetchDataFromGoogle()
+                        await syncExpensesFromDrive()
                         break
                     }
                 }
@@ -811,7 +816,8 @@ final class CalendarPopupViewModel: ObservableObject {
         var list = allExpenses[expenseDateStr] ?? []
         list.append(item)
         allExpenses[expenseDateStr] = list
-        saveExpenses()
+        saveExpensesLocally()
+        Task { await uploadExpensesToDrive() }
     }
     
     func updateExpense(_ item: ExpenseItem, newAmount: Int, newNote: String) {
@@ -822,7 +828,8 @@ final class CalendarPopupViewModel: ObservableObject {
             list[idx].amount = newAmount
             list[idx].note = newNote.isEmpty ? nil : newNote
             allExpenses[item.dateString] = list
-            saveExpenses()
+            saveExpensesLocally()
+            Task { await uploadExpensesToDrive() }
         }
     }
     
@@ -834,10 +841,11 @@ final class CalendarPopupViewModel: ObservableObject {
         } else {
             allExpenses[item.dateString] = list
         }
-        saveExpenses()
+        saveExpensesLocally()
+        Task { await uploadExpensesToDrive() }
     }
     
-    // MARK: - File Storage (Application Support)
+    // MARK: - Local file (cache)
     private var expenseFileURL: URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let folder = appSupport.appendingPathComponent("MenuBarDateApp", isDirectory: true)
@@ -845,7 +853,7 @@ final class CalendarPopupViewModel: ObservableObject {
         return folder.appendingPathComponent(expenseFileName)
     }
     
-    private func loadExpenses() {
+    private func loadExpensesLocally() {
         let url = expenseFileURL
         guard FileManager.default.fileExists(atPath: url.path),
               let data = try? Data(contentsOf: url),
@@ -856,15 +864,138 @@ final class CalendarPopupViewModel: ObservableObject {
         allExpenses = decoded
     }
     
-    private func saveExpenses() {
+    private func saveExpensesLocally() {
         let url = expenseFileURL
         if let data = try? JSONEncoder().encode(allExpenses) {
             try? data.write(to: url, options: .atomic)
         }
     }
     
-    /// Đường dẫn file để copy / backup / commit GitHub
-    var expenseFilePathForBackup: String {
-        expenseFileURL.path
+    // MARK: - Google Drive appDataFolder Sync
+    func syncExpensesFromDrive() async {
+        guard isLoggedIn else {
+            loadExpensesLocally()
+            return
+        }
+        
+        guard let token = await auth.refreshAccessTokenIfNeeded() else {
+            loadExpensesLocally()
+            return
+        }
+        
+        var components = URLComponents(string: "https://www.googleapis.com/drive/v3/files")!
+        components.queryItems = [
+            .init(name: "spaces", value: "appDataFolder"),
+            .init(name: "q", value: "name = 'expenses.json'"),
+            .init(name: "fields", value: "files(id, name, modifiedTime)")
+        ]
+        
+        var request = URLRequest(url: components.url!)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                loadExpensesLocally()
+                return
+            }
+            
+            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let files = json["files"] as? [[String: Any]],
+               let first = files.first,
+               let fileId = first["id"] as? String {
+                
+                driveExpenseFileId = fileId
+                
+                let downloadURL = URL(string: "https://www.googleapis.com/drive/v3/files/\(fileId)?alt=media")!
+                var dlRequest = URLRequest(url: downloadURL)
+                dlRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+                
+                let (fileData, _) = try await URLSession.shared.data(for: dlRequest)
+                if let decoded = try? JSONDecoder().decode([String: [ExpenseItem]].self, from: fileData) {
+                    await MainActor.run {
+                        self.allExpenses = decoded
+                        self.saveExpensesLocally()
+                    }
+                    return
+                }
+            }
+            
+            loadExpensesLocally()
+            
+        } catch {
+            FileLogger.shared.logError(context: "syncExpensesFromDrive", message: error.localizedDescription)
+            loadExpensesLocally()
+        }
+    }
+    
+    private func uploadExpensesToDrive() async {
+        guard isLoggedIn else { return }
+        guard let token = await auth.refreshAccessTokenIfNeeded() else { return }
+        guard let jsonData = try? JSONEncoder().encode(allExpenses) else { return }
+        
+        if let fileId = driveExpenseFileId {
+            // Update file đã tồn tại
+            let url = URL(string: "https://www.googleapis.com/upload/drive/v3/files/\(fileId)?uploadType=media")!
+            var request = URLRequest(url: url)
+            request.httpMethod = "PATCH"
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = jsonData
+            
+            do {
+                let (_, response) = try await URLSession.shared.data(for: request)
+                if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+                    FileLogger.shared.logError(context: "uploadExpensesToDrive", message: "Update failed HTTP \(http.statusCode)")
+                    if http.statusCode == 404 {
+                        driveExpenseFileId = nil
+                        await uploadExpensesToDrive()
+                    }
+                }
+            } catch {
+                FileLogger.shared.logError(context: "uploadExpensesToDrive", message: error.localizedDescription)
+            }
+        } else {
+            // Tạo file mới trong appDataFolder (multipart)
+            let boundary = "Boundary-\(UUID().uuidString)"
+            var body = Data()
+            
+            let metadata = """
+            {
+              "name": "expenses.json",
+              "parents": ["appDataFolder"]
+            }
+            """
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Type: application/json; charset=UTF-8\r\n\r\n".data(using: .utf8)!)
+            body.append(metadata.data(using: .utf8)!)
+            body.append("\r\n".data(using: .utf8)!)
+            
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Type: application/json\r\n\r\n".data(using: .utf8)!)
+            body.append(jsonData)
+            body.append("\r\n".data(using: .utf8)!)
+            body.append("--\(boundary)--\r\n".data(using: .utf8)!)
+            
+            let url = URL(string: "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart")!
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.setValue("multipart/related; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+            request.httpBody = body
+            
+            do {
+                let (data, response) = try await URLSession.shared.data(for: request)
+                if let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode),
+                   let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let newId = json["id"] as? String {
+                    driveExpenseFileId = newId
+                } else {
+                    FileLogger.shared.logError(context: "uploadExpensesToDrive", message: "Create failed")
+                }
+            } catch {
+                FileLogger.shared.logError(context: "uploadExpensesToDrive", message: error.localizedDescription)
+            }
+        }
     }
 }

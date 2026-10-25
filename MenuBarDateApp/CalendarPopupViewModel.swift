@@ -34,9 +34,16 @@ final class CalendarPopupViewModel: ObservableObject {
     @Published var repeatUnit: String = "days" // "days", "weeks", "months", "years"
     @Published var repeatTimes: String = "3"
     
-    @Published var isLoading: Bool = false // Biến trạng thái loading
+    @Published var isLoading: Bool = false
     
     @Published var selectedTab: CalendarTab = .solar
+    
+    // MARK: - Expense State
+    @Published var showExpenseModal: Bool = false
+    @Published var expenseDateStr: String = ""
+    @Published private(set) var allExpenses: [String: [ExpenseItem]] = [:]
+    
+    private let expenseFileName = "expenses.json"
     
     private let calendar = Calendar.current
     private let auth = GoogleAuthManager.shared
@@ -50,15 +57,32 @@ final class CalendarPopupViewModel: ObservableObject {
         calendar.component(.year, from: currentDate)
     }
     
-    /// Năm hiện tại ± 50 năm
     var yearRange: [Int] {
         let y = calendar.component(.year, from: Date())
         return Array((y - 50)...(y + 50))
     }
     
+    // MARK: - Expense Computed
+    var expensesForSelectedDay: [ExpenseItem] {
+        allExpenses[expenseDateStr] ?? []
+    }
+    
+    var expenseDayTotal: Int {
+        expensesForSelectedDay.reduce(0) { $0 + $1.amount }
+    }
+    
+    var monthExpenseTotal: Int {
+        let prefix = String(format: "%04d-%02d", currentYear, currentMonth)
+        return allExpenses
+            .filter { $0.key.hasPrefix(prefix) }
+            .flatMap { $0.value }
+            .reduce(0) { $0 + $1.amount }
+    }
+    
     init() {
         generateCalendarGrid()
         isLoggedIn = auth.isLoggedIn
+        loadExpenses()
     }
     
     // MARK: - Helper xử lý khi token chết
@@ -66,7 +90,6 @@ final class CalendarPopupViewModel: ObservableObject {
         auth.logout()
         isLoggedIn = false
         profileImage = nil
-        // Có thể thêm notification/alert ở đây nếu muốn
         FileLogger.shared.logError(context: "handleAuthFailure", message: "Phiên đăng nhập hết hạn → đã logout tự động")
     }
     
@@ -324,7 +347,6 @@ final class CalendarPopupViewModel: ObservableObject {
                     )
 
                     if let index = days.firstIndex(where: { $0.dateString == dateStr }) {
-                        // Chỉ thêm nếu chưa tồn tại id này
                         if !days[index].items.contains(where: { $0.id == calendarItem.id }) {
                             days[index].items.append(calendarItem)
                         }
@@ -370,24 +392,30 @@ final class CalendarPopupViewModel: ObservableObject {
                     return true
                 }
             }
-            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any], let tasks = json["items"] as? [[String: Any]] {
-                for task in tasks {
-                    guard let title = task["title"] as? String, let due = task["due"] as? String else { continue }
-                    let dateStr = String(due.prefix(10))
+            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any], let items = json["items"] as? [[String: Any]] {
+                for item in items {
+                    guard let title = item["title"] as? String else { continue }
+                    let dateStr: String
+                    if let due = item["due"] as? String {
+                        dateStr = String(due.prefix(10))
+                    } else {
+                        continue
+                    }
+                    
+                    let isCompleted = (item["status"] as? String) == "completed"
+                    
+                    let calendarItem = CalendarItem(
+                        id: item["id"] as? String ?? UUID().uuidString,
+                        title: title,
+                        description: item["notes"] as? String,
+                        type: .task,
+                        isCompleted: isCompleted,
+                        dateString: dateStr
+                    )
+                    
                     if let index = days.firstIndex(where: { $0.dateString == dateStr }) {
-                        let calendarItem = CalendarItem(
-                            id: task["id"] as? String ?? UUID().uuidString,
-                            title: title,
-                            description: task["notes"] as? String,
-                            type: .task,
-                            isCompleted: (task["status"] as? String) == "completed",
-                            dateString: dateStr
-                        )
-
-                        if let index = days.firstIndex(where: { $0.dateString == dateStr }) {
-                            if !days[index].items.contains(where: { $0.id == calendarItem.id }) {
-                                days[index].items.append(calendarItem)
-                            }
+                        if !days[index].items.contains(where: { $0.id == calendarItem.id }) {
+                            days[index].items.append(calendarItem)
                         }
                     }
                 }
@@ -398,51 +426,58 @@ final class CalendarPopupViewModel: ObservableObject {
         return true
     }
     
-    // MARK: - Popup height
     var totalRows: Int { return days.count / 7 }
     var popupHeight: CGFloat { return 90 + (CGFloat(totalRows) * 79) + 24 }
     
-    // MARK: - Thao tác Dữ liệu
     func deleteItem(_ item: CalendarItem) async {
         guard let token = await auth.refreshAccessTokenIfNeeded() else {
             FileLogger.shared.logError(context: "deleteItem", message: "Không thể refresh access token")
             await MainActor.run { handleAuthFailure() }
             return
         }
-        let urlString = item.type == .event ? "https://www.googleapis.com/calendar/v3/calendars/primary/events/\(item.id)" : "https://tasks.googleapis.com/tasks/v1/lists/@default/tasks/\(item.id)"
+        
+        let urlString = item.type == .task
+            ? "https://tasks.googleapis.com/tasks/v1/lists/@default/tasks/\(item.id)"
+            : "https://www.googleapis.com/calendar/v3/calendars/primary/events/\(item.id)"
+        
         guard let url = URL(string: urlString) else { return }
+        
         var request = URLRequest(url: url)
         request.httpMethod = "DELETE"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         
+        await MainActor.run {
+            if let dayIndex = days.firstIndex(where: { $0.dateString == item.dateString }) {
+                days[dayIndex].items.removeAll { $0.id == item.id }
+            }
+        }
+        
         do {
             let (_, response) = try await URLSession.shared.data(for: request)
             if let httpResponse = response as? HTTPURLResponse {
-                if (200...299).contains(httpResponse.statusCode) {
-                    await MainActor.run {
-                        if let dayIndex = days.firstIndex(where: { $0.dateString == item.dateString }) {
-                            days[dayIndex].items.removeAll(where: { $0.id == item.id })
-                        }
-                    }
-                } else if httpResponse.statusCode == 401 {
-                    FileLogger.shared.logError(context: "deleteItem", message: "HTTP 401 → logout")
+                if httpResponse.statusCode == 401 {
+                    FileLogger.shared.logError(context: "deleteItem", message: "HTTP 401 Unauthorized")
                     await MainActor.run { handleAuthFailure() }
-                } else {
+                    await fetchDataFromGoogle()
+                } else if !(200...299).contains(httpResponse.statusCode) && httpResponse.statusCode != 204 {
                     FileLogger.shared.logError(context: "deleteItem", message: "HTTP Status \(httpResponse.statusCode)")
+                    await fetchDataFromGoogle()
                 }
             }
         } catch {
             FileLogger.shared.logError(context: "deleteItem", message: error.localizedDescription)
+            await fetchDataFromGoogle()
         }
     }
-
+    
     func toggleTaskStatus(_ item: CalendarItem) async {
-        guard item.type == .task else { return }
         await MainActor.run {
-            if let dayIndex = days.firstIndex(where: { $0.dateString == item.dateString }), let itemIndex = days[dayIndex].items.firstIndex(where: { $0.id == item.id }) {
+            if let dayIndex = days.firstIndex(where: { $0.dateString == item.dateString }),
+               let itemIndex = days[dayIndex].items.firstIndex(where: { $0.id == item.id }) {
                 days[dayIndex].items[itemIndex].isCompleted.toggle()
             }
         }
+        
         guard let token = await auth.refreshAccessTokenIfNeeded() else {
             FileLogger.shared.logError(context: "toggleTaskStatus", message: "Không thể refresh access token")
             await rollbackStatus(item)
@@ -720,5 +755,116 @@ final class CalendarPopupViewModel: ObservableObject {
             FileLogger.shared.logError(context: "submitEditItem", message: error.localizedDescription)
             await fetchDataFromGoogle()
         }
+    }
+    
+    // MARK: - Expense Helpers
+    func totalExpense(for dateStr: String) -> Int {
+        (allExpenses[dateStr] ?? []).reduce(0) { $0 + $1.amount }
+    }
+    
+    func formatAmount(_ amount: Int) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.groupingSeparator = ","
+        formatter.locale = Locale(identifier: "en_US")
+        return (formatter.string(from: NSNumber(value: amount)) ?? "\(amount)") + " ₫"
+    }
+    
+    func formatShortAmount(_ amount: Int) -> String {
+        if amount >= 1_000_000 {
+            let m = Double(amount) / 1_000_000
+            if m == floor(m) {
+                return String(format: "%.0fM", m)
+            }
+            return String(format: "%.1fM", m).replacingOccurrences(of: ".0", with: "")
+        } else if amount >= 1_000 {
+            let k = amount / 1_000
+            let formatter = NumberFormatter()
+            formatter.numberStyle = .decimal
+            formatter.groupingSeparator = ","
+            return (formatter.string(from: NSNumber(value: k)) ?? "\(k)") + "k"
+        }
+        return "\(amount)"
+    }
+    
+    // MARK: - Expense Actions
+    func openExpenseModal(dateStr: String) {
+        expenseDateStr = dateStr
+        showExpenseModal = true
+    }
+    
+    func closeExpenseModal() {
+        showExpenseModal = false
+        expenseDateStr = ""
+    }
+    
+    func addExpense(amount: Int, note: String) {
+        guard amount > 0, !expenseDateStr.isEmpty else { return }
+        
+        let item = ExpenseItem(
+            id: UUID().uuidString,
+            amount: amount,
+            note: note.isEmpty ? nil : note,
+            dateString: expenseDateStr
+        )
+        
+        var list = allExpenses[expenseDateStr] ?? []
+        list.append(item)
+        allExpenses[expenseDateStr] = list
+        saveExpenses()
+    }
+    
+    func updateExpense(_ item: ExpenseItem, newAmount: Int, newNote: String) {
+        guard newAmount > 0 else { return }
+        guard var list = allExpenses[item.dateString] else { return }
+        
+        if let idx = list.firstIndex(where: { $0.id == item.id }) {
+            list[idx].amount = newAmount
+            list[idx].note = newNote.isEmpty ? nil : newNote
+            allExpenses[item.dateString] = list
+            saveExpenses()
+        }
+    }
+    
+    func removeExpense(_ item: ExpenseItem) {
+        guard var list = allExpenses[item.dateString] else { return }
+        list.removeAll { $0.id == item.id }
+        if list.isEmpty {
+            allExpenses.removeValue(forKey: item.dateString)
+        } else {
+            allExpenses[item.dateString] = list
+        }
+        saveExpenses()
+    }
+    
+    // MARK: - File Storage (Application Support)
+    private var expenseFileURL: URL {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let folder = appSupport.appendingPathComponent("MenuBarDateApp", isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder.appendingPathComponent(expenseFileName)
+    }
+    
+    private func loadExpenses() {
+        let url = expenseFileURL
+        guard FileManager.default.fileExists(atPath: url.path),
+              let data = try? Data(contentsOf: url),
+              let decoded = try? JSONDecoder().decode([String: [ExpenseItem]].self, from: data) else {
+            allExpenses = [:]
+            return
+        }
+        allExpenses = decoded
+    }
+    
+    private func saveExpenses() {
+        let url = expenseFileURL
+        if let data = try? JSONEncoder().encode(allExpenses) {
+            try? data.write(to: url, options: .atomic)
+        }
+    }
+    
+    /// Đường dẫn file để copy / backup / commit GitHub
+    var expenseFilePathForBackup: String {
+        expenseFileURL.path
     }
 }

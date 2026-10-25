@@ -4,11 +4,49 @@ struct DayCellView: View {
     let day: DayModel
     @ObservedObject var viewModel: CalendarPopupViewModel
     
+    @State private var isHoveringDollar = false
+    
+    private var dayTotal: Int {
+        viewModel.totalExpense(for: day.dateString)
+    }
+    
     var body: some View {
         VStack(spacing: 2) {
             // Header Ngày
-            HStack(alignment: .center) {
-                Spacer()
+            HStack(alignment: .center, spacing: 2) {
+                // Trái: $ + tổng rút gọn
+                Button {
+                    viewModel.openExpenseModal(dateStr: day.dateString)
+                } label: {
+                    HStack(spacing: 1) {
+                        Text("$")
+                            .font(.system(size: 10, weight: .bold))
+                        if dayTotal > 0 {
+                            Text(viewModel.formatShortAmount(dayTotal))
+                                .font(.system(size: 9))
+                                .lineLimit(1)
+                        }
+                    }
+                    .foregroundColor(dayTotal > 0 ? Color(hex: "#fbbc04") : Color(hex: "#70757a"))
+                    .padding(.horizontal, 3)
+                    .padding(.vertical, 1)
+                    .background(isHoveringDollar ? Color.white.opacity(0.12) : Color.clear)
+                    .cornerRadius(3)
+                }
+                .buttonStyle(PlainButtonStyle())
+                .frame(minWidth: 28, alignment: .leading)
+                .onHover { hovering in
+                    isHoveringDollar = hovering
+                    if hovering {
+                        NSCursor.pointingHand.push()
+                    } else {
+                        NSCursor.pop()
+                    }
+                }
+                
+                Spacer(minLength: 0)
+                
+                // Giữa: Ngày
                 Text("\(day.dayNumber)")
                     .font(.system(size: 15))
                     .frame(width: 22, height: 22)
@@ -16,10 +54,14 @@ struct DayCellView: View {
                     .foregroundColor(day.isToday ? Color(hex: "#282a2e") : .white)
                     .clipShape(Circle())
                     .fontWeight(day.isToday ? .bold : .regular)
-                Spacer()
+                
+                Spacer(minLength: 0)
+                
+                // Phải: Âm lịch
                 Text("\(day.lunarDay)/\(day.lunarMonth)")
                     .font(.system(size: 12))
                     .foregroundColor(Color(hex: "#70757a"))
+                    .frame(minWidth: 28, alignment: .trailing)
             }
             .padding(.horizontal, 4)
             .padding(.top, 2)
@@ -42,7 +84,6 @@ struct DayCellView: View {
             RoundedRectangle(cornerRadius: 4)
                 .stroke(Color(hex: "#3b3e43"), lineWidth: 1)
         )
-        // MARK: - Context Menu 3: Vùng trống trong ô ngày
         .contextMenu {
             Button {
                 viewModel.openAddModal(isTask: true, dateStr: day.dateString)
@@ -55,10 +96,17 @@ struct DayCellView: View {
             } label: {
                 Text("+ Event")
             }
+            
+            Button {
+                viewModel.openExpenseModal(dateStr: day.dateString)
+            } label: {
+                Text("Chi tiêu")
+            }
         }
     }
 }
 
+// ItemView giữ nguyên như trước
 struct ItemView: View {
     let item: CalendarItem
     @ObservedObject var viewModel: CalendarPopupViewModel
@@ -92,10 +140,8 @@ struct ItemView: View {
         .strikethrough(item.isCompleted)
         .opacity(item.isCompleted ? 0.7 : 1.0)
         .help(item.description?.isEmpty == false ? "\(item.title)\n\(item.description!)" : item.title)
-        // MARK: - Context Menu 1 & 2: Click trực tiếp vào Task hoặc Event
         .contextMenu {
             if item.type == .task {
-                // Context Menu 1: Click chuột phải vào Task
                 Button {
                     viewModel.openEditModal(for: item)
                 } label: {
@@ -110,7 +156,6 @@ struct ItemView: View {
                     Text(item.isCompleted ? "Incomplete" : "Complete")
                 }
             } else {
-                // Context Menu 2: Click chuột phải vào Event
                 Button {
                     viewModel.openEditModal(for: item)
                 } label: {

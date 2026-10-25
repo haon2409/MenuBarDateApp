@@ -20,7 +20,7 @@ struct CalendarPopupView: View {
             VStack(spacing: 12) {
                 // MARK: - Header
                 HStack {
-                    // 1. Select Tháng + Năm
+                    // 1. Select Tháng + Năm + Tổng tháng
                     HStack(spacing: 8) {
                         // Picker Tháng (1→12)
                         Picker("", selection: Binding(
@@ -49,10 +49,16 @@ struct CalendarPopupView: View {
                         .labelsHidden()
                         .accentColor(.white)
                         .disabled(viewModel.isLoading)
+                        
+                        // Tổng chi tiêu tháng
+                        Text(viewModel.formatShortAmount(viewModel.monthExpenseTotal))
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(orangeColor)
+                            .padding(.leading, 4)
                     }
                     .layoutPriority(1)
                     
-                    // 2. Thanh Progress nằm giữa (thay thế Spacer khi đang load)
+                    // 2. Thanh Progress nằm giữa
                     if viewModel.isLoading {
                         ProgressView()
                             .progressViewStyle(LinearProgressViewStyle(tint: cyanColor))
@@ -68,27 +74,24 @@ struct CalendarPopupView: View {
                         }) {
                             if viewModel.isLoggedIn {
                                 if let nsImage = viewModel.profileImage {
-                                    // Trường hợp 1: Đã load xong ảnh thực tế
                                     Image(nsImage: nsImage)
                                         .resizable()
                                         .scaledToFill()
                                         .frame(width: 24, height: 24)
                                         .clipShape(Circle())
                                 } else {
-                                    // Trường hợp 2: Đang load ảnh hoặc load lỗi
                                     Image(systemName: "person.crop.circle")
                                         .resizable()
                                         .frame(width: 24, height: 24)
                                         .foregroundColor(.gray)
                                 }
                             } else {
-                                // Trường hợp 3: Chưa đăng nhập
                                 Image(systemName: "arrow.right.square")
                                     .padding(6)
                             }
                         }
                         .help(viewModel.isLoggedIn ? "logout" : "login")
-                        .buttonStyle(PlainButtonStyle()) // Bổ sung dòng này để triệt tiêu hiệu ứng hover xám mặc định của macOS
+                        .buttonStyle(PlainButtonStyle())
                         
                         HStack(spacing: 4) {
                             navButton(icon: "arrow.left", action: { viewModel.changeMonth(by: -1) })
@@ -132,10 +135,14 @@ struct CalendarPopupView: View {
                 Color.black.opacity(0.6).ignoresSafeArea()
                 AddModalView(viewModel: viewModel)
             }
+            
+            if viewModel.showExpenseModal {
+                Color.black.opacity(0.6).ignoresSafeArea()
+                ExpenseModalView(viewModel: viewModel)
+            }
         }
-        .frame(width: 770, height: viewModel.popupHeight) // Co giãn chiều cao động theo viewModel
+        .frame(width: 770, height: viewModel.popupHeight)
         .onAppear {
-            // Sự kiện này xảy ra mỗi khi Popup được mở
             viewModel.onPopupAppear()
         }
     }

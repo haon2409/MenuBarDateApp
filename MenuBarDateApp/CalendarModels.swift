@@ -14,7 +14,7 @@ extension Color {
         case 8: (a, r, g, b) = (int >> 24, int >> 16 & 0xFF, int >> 8 & 0xFF, int & 0xFF)
         default: (a, r, g, b) = (255, 0, 0, 0)
         }
-        self.init(.sRGB, red: Double(r) / 255, green: Double(g) / 255, blue:  Double(b) / 255, opacity: Double(a) / 255)
+        self.init(.sRGB, red: Double(r) / 255, green: Double(g) / 255, blue: Double(b) / 255, opacity: Double(a) / 255)
     }
 }
 
@@ -41,4 +41,12 @@ struct DayModel: Identifiable {
     let isToday: Bool
     var items: [CalendarItem]
     var dateString: String
+}
+
+// MARK: - Expense
+struct ExpenseItem: Identifiable, Codable, Equatable {
+    let id: String
+    var amount: Int          // VND, số nguyên
+    var note: String?
+    var dateString: String   // yyyy-MM-dd
 }

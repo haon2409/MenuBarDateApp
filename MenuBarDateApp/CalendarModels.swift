@@ -43,10 +43,44 @@ struct DayModel: Identifiable {
     var dateString: String
 }
 
+// MARK: - Expense Type
+enum ExpenseType: String, Codable, CaseIterable, Identifiable {
+    case utility = "Điện + Nước + Rác + Internet + 5G"
+    case daily = "Ăn uống, tiêu dùng, đi lại"
+    case shopping = "Mua sắm (ngoài thiết yếu)"
+    case love = "Love"
+    case family = "Family (Quà Tết, SN)"
+    case medical = "Viện phí"
+    case other = "Phát sinh (bảo trì, sửa chữa, hiếu hỷ, đám tiệc,...)"
+    
+    var id: String { rawValue }
+    
+    var color: Color {
+        switch self {
+        case .utility:   return Color(hex: "#FF9500") // Cam
+        case .daily:     return Color(hex: "#34C759") // Xanh lá
+        case .shopping:  return Color(hex: "#AF52DE") // Tím
+        case .love:      return Color(hex: "#FF2D55") // Hồng
+        case .family:    return Color(hex: "#007AFF") // Xanh dương
+        case .medical:   return Color(hex: "#FF3B30") // Đỏ
+        case .other:     return Color(hex: "#8E8E93") // Xám
+        }
+    }
+}
+
 // MARK: - Expense
 struct ExpenseItem: Identifiable, Codable, Equatable {
     let id: String
-    var amount: Int          // VND, số nguyên
+    var amount: Int
     var note: String?
-    var dateString: String   // yyyy-MM-dd
+    var dateString: String
+    var type: ExpenseType
+    
+    init(id: String, amount: Int, note: String?, dateString: String, type: ExpenseType = .other) {
+        self.id = id
+        self.amount = amount
+        self.note = note
+        self.dateString = dateString
+        self.type = type
+    }
 }

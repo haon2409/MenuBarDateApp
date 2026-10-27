@@ -20,9 +20,9 @@ struct CalendarPopupView: View {
             VStack(spacing: 12) {
                 // MARK: - Header
                 HStack {
-                    // 1. Select Tháng + Năm + Tổng tháng
-                    HStack(spacing: 8) {
-                        // Picker Tháng (1→12)
+                    // 1. Tháng + Tổng tháng + Năm + Tổng năm
+                    HStack(spacing: 6) {
+                        // Picker Tháng
                         Picker("", selection: Binding(
                             get: { viewModel.currentMonth },
                             set: { viewModel.setMonth($0) }
@@ -36,7 +36,22 @@ struct CalendarPopupView: View {
                         .accentColor(.white)
                         .disabled(viewModel.isLoading)
                         
-                        // Picker Năm (±50 năm)
+                        // Tổng chi tiêu Tháng (click → summary)
+                        Button {
+                            viewModel.openExpenseSummary(mode: .month)
+                        } label: {
+                            Text(viewModel.formatShortAmount(viewModel.monthExpenseTotal))
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(orangeColor)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 3)
+                                .background(Color(hex: "#3a3d42"))
+                                .cornerRadius(4)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        .help("Chi tiết chi tiêu tháng")
+                        
+                        // Picker Năm
                         Picker("", selection: Binding(
                             get: { viewModel.currentYear },
                             set: { viewModel.setYear($0) }
@@ -50,15 +65,24 @@ struct CalendarPopupView: View {
                         .accentColor(.white)
                         .disabled(viewModel.isLoading)
                         
-                        // Tổng chi tiêu tháng
-                        Text(viewModel.formatShortAmount(viewModel.monthExpenseTotal))
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(orangeColor)
-                            .padding(.leading, 4)
+                        // Tổng chi tiêu Năm (click → summary)
+                        Button {
+                            viewModel.openExpenseSummary(mode: .year)
+                        } label: {
+                            Text(viewModel.formatShortAmount(viewModel.yearExpenseTotal))
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(orangeColor)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 3)
+                                .background(Color(hex: "#3a3d42"))
+                                .cornerRadius(4)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        .help("Chi tiết chi tiêu năm")
                     }
                     .layoutPriority(1)
                     
-                    // 2. Thanh Progress nằm giữa
+                    // 2. Progress giữa
                     if viewModel.isLoading {
                         ProgressView()
                             .progressViewStyle(LinearProgressViewStyle(tint: cyanColor))
@@ -139,6 +163,11 @@ struct CalendarPopupView: View {
             if viewModel.showExpenseModal {
                 Color.black.opacity(0.6).ignoresSafeArea()
                 ExpenseModalView(viewModel: viewModel)
+            }
+            
+            if viewModel.showExpenseSummaryModal {
+                Color.black.opacity(0.6).ignoresSafeArea()
+                ExpenseSummaryModalView(viewModel: viewModel)
             }
         }
         .frame(width: 770, height: viewModel.popupHeight)

@@ -43,6 +43,14 @@ final class CalendarPopupViewModel: ObservableObject {
     @Published var expenseDateStr: String = ""
     @Published private(set) var allExpenses: [String: [ExpenseItem]] = [:]
     
+    // Summary popup (Tháng / Năm)
+    @Published var showExpenseSummaryModal: Bool = false
+    @Published var expenseSummaryMode: ExpenseSummaryMode = .month
+    
+    enum ExpenseSummaryMode {
+        case month, year
+    }
+    
     private let expenseFileName = "expenses.json"
     private var driveExpenseFileId: String? = nil
     
@@ -78,6 +86,37 @@ final class CalendarPopupViewModel: ObservableObject {
             .filter { $0.key.hasPrefix(prefix) }
             .flatMap { $0.value }
             .reduce(0) { $0 + $1.amount }
+    }
+    
+    var yearExpenseTotal: Int {
+        let prefix = String(format: "%04d-", currentYear)
+        return allExpenses
+            .filter { $0.key.hasPrefix(prefix) }
+            .flatMap { $0.value }
+            .reduce(0) { $0 + $1.amount }
+    }
+    
+    /// Tổng theo từng type (dùng cho popup summary)
+    func expenseBreakdown(for mode: ExpenseSummaryMode) -> [(type: ExpenseType, total: Int)] {
+        let items: [ExpenseItem]
+        switch mode {
+        case .month:
+            let prefix = String(format: "%04d-%02d", currentYear, currentMonth)
+            items = allExpenses.filter { $0.key.hasPrefix(prefix) }.flatMap { $0.value }
+        case .year:
+            let prefix = String(format: "%04d-", currentYear)
+            items = allExpenses.filter { $0.key.hasPrefix(prefix) }.flatMap { $0.value }
+        }
+        
+        var dict: [ExpenseType: Int] = [:]
+        for item in items {
+            dict[item.type, default: 0] += item.amount
+        }
+        
+        return ExpenseType.allCases.compactMap { type in
+            let total = dict[type] ?? 0
+            return total > 0 ? (type, total) : nil
+        }
     }
     
     init() {
@@ -803,14 +842,24 @@ final class CalendarPopupViewModel: ObservableObject {
         expenseDateStr = ""
     }
     
-    func addExpense(amount: Int, note: String) {
+    func openExpenseSummary(mode: ExpenseSummaryMode) {
+        expenseSummaryMode = mode
+        showExpenseSummaryModal = true
+    }
+    
+    func closeExpenseSummary() {
+        showExpenseSummaryModal = false
+    }
+    
+    func addExpense(amount: Int, note: String, type: ExpenseType = .other) {
         guard amount > 0, !expenseDateStr.isEmpty else { return }
         
         let item = ExpenseItem(
             id: UUID().uuidString,
             amount: amount,
             note: note.isEmpty ? nil : note,
-            dateString: expenseDateStr
+            dateString: expenseDateStr,
+            type: type
         )
         
         var list = allExpenses[expenseDateStr] ?? []
@@ -820,13 +869,14 @@ final class CalendarPopupViewModel: ObservableObject {
         Task { await uploadExpensesToDrive() }
     }
     
-    func updateExpense(_ item: ExpenseItem, newAmount: Int, newNote: String) {
+    func updateExpense(_ item: ExpenseItem, newAmount: Int, newNote: String, newType: ExpenseType) {
         guard newAmount > 0 else { return }
         guard var list = allExpenses[item.dateString] else { return }
         
         if let idx = list.firstIndex(where: { $0.id == item.id }) {
             list[idx].amount = newAmount
             list[idx].note = newNote.isEmpty ? nil : newNote
+            list[idx].type = newType
             allExpenses[item.dateString] = list
             saveExpensesLocally()
             Task { await uploadExpensesToDrive() }

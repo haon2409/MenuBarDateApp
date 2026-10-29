@@ -47,6 +47,9 @@ final class CalendarPopupViewModel: ObservableObject {
     @Published var showExpenseSummaryModal: Bool = false
     @Published var expenseSummaryMode: ExpenseSummaryMode = .month
     
+    // Tide settings panel
+    @Published var showTideSettings: Bool = false
+    
     enum ExpenseSummaryMode {
         case month, year
     }
@@ -471,7 +474,10 @@ final class CalendarPopupViewModel: ObservableObject {
     }
     
     var totalRows: Int { return days.count / 7 }
-    var popupHeight: CGFloat { return 90 + (CGFloat(totalRows) * 79) + 24 }
+    var popupHeight: CGFloat {
+        let cellH: CGFloat = TideService.shared.isEnabled ? 99 : 79
+        return 90 + (CGFloat(totalRows) * cellH) + 24
+    }
     
     func deleteItem(_ item: CalendarItem) async {
         guard let token = await auth.refreshAccessTokenIfNeeded() else {

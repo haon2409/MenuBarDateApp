@@ -10,9 +10,12 @@ struct MenuBarDateApp: App {
             CalendarPopupView(viewModel: popupViewModel)
                 .environmentObject(menuBarViewModel)
         } label: {
-            if let icon = menuBarViewModel.combinedIcon {
-                icon
+            Group {
+                if let icon = menuBarViewModel.combinedIcon {
+                    icon
+                }
             }
+            .help(menuBarViewModel.iconTooltip)
         }
         .menuBarExtraStyle(.window)
     }

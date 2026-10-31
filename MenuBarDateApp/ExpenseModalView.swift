@@ -2,17 +2,18 @@ import SwiftUI
 
 struct ExpenseModalView: View {
     @ObservedObject var viewModel: CalendarPopupViewModel
+    @ObservedObject private var typeConfig = ExpenseTypeConfig.shared
     
     @State private var inputAmount: String = ""
     @State private var inputNote: String = ""
-    @State private var inputType: ExpenseType = .other
+    @State private var inputType: ExpenseType = ExpenseTypeConfig.shared.defaultType
     @State private var showError: Bool = false
     
     // Edit state
     @State private var editingId: String? = nil
     @State private var editAmount: String = ""
     @State private var editNote: String = ""
-    @State private var editType: ExpenseType = .other
+    @State private var editType: ExpenseType = ExpenseTypeConfig.shared.defaultType
     
     private var dateTitle: String {
         let parts = viewModel.expenseDateStr.split(separator: "-")
@@ -95,8 +96,8 @@ struct ExpenseModalView: View {
                                 
                                 HStack(spacing: 6) {
                                     Picker("", selection: $editType) {
-                                        ForEach(ExpenseType.allCases) { t in
-                                            Text(t.rawValue).tag(t)
+                                        ForEach(typeConfig.orderedTypes) { t in
+                                            Text(t.displayName).tag(t)
                                         }
                                     }
                                     .pickerStyle(.menu)
@@ -135,7 +136,7 @@ struct ExpenseModalView: View {
                                             .font(.system(size: 12, weight: .medium))
                                             .foregroundColor(.white)
                                         
-                                        Text(exp.type.rawValue)
+                                        Text(exp.type.displayName)
                                             .font(.system(size: 9, weight: .medium))
                                             .foregroundColor(exp.type.color)
                                             .padding(.horizontal, 5)
@@ -210,8 +211,8 @@ struct ExpenseModalView: View {
                 
                 HStack(spacing: 6) {
                     Picker("Loại", selection: $inputType) {
-                        ForEach(ExpenseType.allCases) { t in
-                            Text(t.rawValue).tag(t)
+                        ForEach(typeConfig.orderedTypes) { t in
+                            Text(t.displayName).tag(t)
                         }
                     }
                     .pickerStyle(.menu)
@@ -280,7 +281,7 @@ struct ExpenseModalView: View {
         )
         inputAmount = ""
         inputNote = ""
-        inputType = .other
+        inputType = typeConfig.defaultType
     }
     
     private func startEdit(_ exp: ExpenseItem) {

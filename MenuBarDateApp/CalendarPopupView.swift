@@ -95,6 +95,20 @@ struct CalendarPopupView: View {
                     
                     // 3. Cụm nút Control
                     HStack(spacing: 8) {
+                        // Nút Expense Type Settings ($)
+                        Button {
+                            viewModel.showExpenseSettings = true
+                        } label: {
+                            Image(systemName: "dollarsign.circle")
+                                .font(.system(size: 13))
+                                .frame(width: 30, height: 30)
+                                .background(Color(hex: "#4a4d53"))
+                                .foregroundColor(.white)
+                                .cornerRadius(6)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        .help("Cài đặt loại chi tiêu")
+                        
                         // Nút Tide Settings
                         Button {
                             viewModel.showTideSettings = true
@@ -189,6 +203,11 @@ struct CalendarPopupView: View {
             if viewModel.showTideSettings {
                 Color.black.opacity(0.6).ignoresSafeArea()
                 TideSettingsView(viewModel: viewModel)
+            }
+            
+            if viewModel.showExpenseSettings {
+                Color.black.opacity(0.6).ignoresSafeArea()
+                ExpenseSettingsView(viewModel: viewModel)
             }
         }
         .frame(width: 770, height: viewModel.popupHeight)
@@ -370,6 +389,170 @@ struct TideSettingsView: View {
         }
         viewModel.objectWillChange.send()
         viewModel.showTideSettings = false
+    }
+}
+
+// MARK: - Expense Type Settings Panel
+
+struct ExpenseSettingsView: View {
+    @ObservedObject var viewModel: CalendarPopupViewModel
+    @ObservedObject private var config = ExpenseTypeConfig.shared
+    
+    /// Bản nháp tên đang chỉnh (rawValue → text)
+    @State private var draftNames: [String: String] = [:]
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Text("Cài đặt loại chi tiêu")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(.white)
+                Spacer()
+                Button {
+                    viewModel.showExpenseSettings = false
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(.white.opacity(0.7))
+                        .frame(width: 24, height: 24)
+                        .background(Color.white.opacity(0.12))
+                        .clipShape(Circle())
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(Color(hex: "#1f2124"))
+            
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Kéo / dùng mũi tên để sắp xếp. Loại đứng đầu là mặc định khi thêm chi tiêu mới.")
+                    .font(.system(size: 11))
+                    .foregroundColor(.white.opacity(0.55))
+                    .fixedSize(horizontal: false, vertical: true)
+                
+                // Danh sách 7 loại
+                VStack(spacing: 6) {
+                    ForEach(Array(config.orderedTypes.enumerated()), id: \.element.id) { index, type in
+                        HStack(spacing: 8) {
+                            // Màu
+                            Circle()
+                                .fill(type.color)
+                                .frame(width: 10, height: 10)
+                            
+                            // Tên (editable)
+                            TextField(type.rawValue, text: Binding(
+                                get: { draftNames[type.rawValue] ?? type.displayName },
+                                set: { draftNames[type.rawValue] = $0 }
+                            ))
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 12))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 6)
+                            .background(Color(hex: "#202124"))
+                            .cornerRadius(4)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 4)
+                                    .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                            )
+                            
+                            // Badge mặc định
+                            if index == 0 {
+                                Text("Mặc định")
+                                    .font(.system(size: 9, weight: .semibold))
+                                    .foregroundColor(Color(hex: "#1bb5d6"))
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 3)
+                                    .background(Color(hex: "#1bb5d6").opacity(0.18))
+                                    .cornerRadius(4)
+                            }
+                            
+                            // Nút lên / xuống
+                            VStack(spacing: 2) {
+                                Button {
+                                    applyDraftName(for: type)
+                                    config.moveUp(type)
+                                } label: {
+                                    Image(systemName: "chevron.up")
+                                        .font(.system(size: 9, weight: .bold))
+                                        .foregroundColor(index == 0 ? .gray.opacity(0.4) : .white.opacity(0.8))
+                                        .frame(width: 22, height: 16)
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                                .disabled(index == 0)
+                                
+                                Button {
+                                    applyDraftName(for: type)
+                                    config.moveDown(type)
+                                } label: {
+                                    Image(systemName: "chevron.down")
+                                        .font(.system(size: 9, weight: .bold))
+                                        .foregroundColor(index == config.orderedTypes.count - 1 ? .gray.opacity(0.4) : .white.opacity(0.8))
+                                        .frame(width: 22, height: 16)
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                                .disabled(index == config.orderedTypes.count - 1)
+                            }
+                        }
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 2)
+                    }
+                }
+                
+                HStack(spacing: 10) {
+                    Button("Lưu") {
+                        saveAll()
+                    }
+                    .buttonStyle(TidePrimaryButtonStyle())
+                    
+                    Button("Đặt lại mặc định") {
+                        config.resetToDefaults()
+                        loadDrafts()
+                    }
+                    .buttonStyle(TideSecondaryButtonStyle())
+                    
+                    Spacer()
+                }
+                .padding(.top, 4)
+            }
+            .padding(16)
+        }
+        .frame(width: 420)
+        .background(Color(hex: "#2c2f34"))
+        .cornerRadius(10)
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color.white.opacity(0.1), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.5), radius: 20)
+        .onAppear {
+            loadDrafts()
+        }
+    }
+    
+    private func loadDrafts() {
+        var dict: [String: String] = [:]
+        for type in config.orderedTypes {
+            dict[type.rawValue] = type.displayName
+        }
+        draftNames = dict
+    }
+    
+    private func applyDraftName(for type: ExpenseType) {
+        if let name = draftNames[type.rawValue] {
+            config.setDisplayName(type, name: name)
+        }
+    }
+    
+    private func saveAll() {
+        for type in ExpenseType.allCases {
+            if let name = draftNames[type.rawValue] {
+                config.setDisplayName(type, name: name)
+            }
+        }
+        viewModel.objectWillChange.send()
+        viewModel.showExpenseSettings = false
     }
 }
 

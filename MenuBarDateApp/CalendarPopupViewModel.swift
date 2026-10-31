@@ -50,6 +50,9 @@ final class CalendarPopupViewModel: ObservableObject {
     // Tide settings panel
     @Published var showTideSettings: Bool = false
     
+    // Expense type settings panel
+    @Published var showExpenseSettings: Bool = false
+    
     enum ExpenseSummaryMode {
         case month, year
     }
@@ -99,7 +102,7 @@ final class CalendarPopupViewModel: ObservableObject {
             .reduce(0) { $0 + $1.amount }
     }
     
-    /// Tổng theo từng type (dùng cho popup summary)
+    /// Tổng theo từng type (dùng cho popup summary) — theo thứ tự người dùng đã sắp xếp
     func expenseBreakdown(for mode: ExpenseSummaryMode) -> [(type: ExpenseType, total: Int)] {
         let items: [ExpenseItem]
         switch mode {
@@ -116,7 +119,7 @@ final class CalendarPopupViewModel: ObservableObject {
             dict[item.type, default: 0] += item.amount
         }
         
-        return ExpenseType.allCases.compactMap { type in
+        return ExpenseTypeConfig.shared.orderedTypes.compactMap { type in
             let total = dict[type] ?? 0
             return total > 0 ? (type, total) : nil
         }
@@ -857,15 +860,16 @@ final class CalendarPopupViewModel: ObservableObject {
         showExpenseSummaryModal = false
     }
     
-    func addExpense(amount: Int, note: String, type: ExpenseType = .other) {
+    func addExpense(amount: Int, note: String, type: ExpenseType? = nil) {
         guard amount > 0, !expenseDateStr.isEmpty else { return }
+        let resolvedType = type ?? ExpenseTypeConfig.shared.defaultType
         
         let item = ExpenseItem(
             id: UUID().uuidString,
             amount: amount,
             note: note.isEmpty ? nil : note,
             dateString: expenseDateStr,
-            type: type
+            type: resolvedType
         )
         
         var list = allExpenses[expenseDateStr] ?? []

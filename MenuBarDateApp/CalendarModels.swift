@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import Combine
 
 // Đặt extension trực tiếp ở đây
 extension Color {
@@ -55,6 +56,11 @@ enum ExpenseType: String, Codable, CaseIterable, Identifiable {
     
     var id: String { rawValue }
     
+    /// Tên hiển thị (có thể đã được người dùng chỉnh trong Settings)
+    var displayName: String {
+        ExpenseTypeConfig.shared.displayName(for: self)
+    }
+    
     var color: Color {
         switch self {
         case .utility:   return Color(hex: "#FF9500") // Cam
@@ -65,6 +71,103 @@ enum ExpenseType: String, Codable, CaseIterable, Identifiable {
         case .medical:   return Color(hex: "#FF3B30") // Đỏ
         case .other:     return Color(hex: "#8E8E93") // Xám
         }
+    }
+}
+
+// MARK: - Expense Type Config (tên + thứ tự, lưu UserDefaults)
+final class ExpenseTypeConfig: ObservableObject {
+    static let shared = ExpenseTypeConfig()
+    
+    private let namesKey = "expenseTypeCustomNames"
+    private let orderKey = "expenseTypeOrder"
+    
+    /// rawValue → tên hiển thị tuỳ chỉnh
+    @Published private(set) var customNames: [String: String] = [:]
+    
+    /// Thứ tự các loại (rawValue). Phần tử đầu = loại mặc định khi thêm chi tiêu mới.
+    @Published private(set) var orderedRawValues: [String] = ExpenseType.allCases.map(\.rawValue)
+    
+    private init() {
+        load()
+    }
+    
+    var orderedTypes: [ExpenseType] {
+        let mapped = orderedRawValues.compactMap { ExpenseType(rawValue: $0) }
+        // Đảm bảo đủ 7 case (phòng dữ liệu cũ / corrupt)
+        let missing = ExpenseType.allCases.filter { type in !mapped.contains(type) }
+        return mapped + missing
+    }
+    
+    /// Loại mặc định = loại đứng đầu danh sách
+    var defaultType: ExpenseType {
+        orderedTypes.first ?? .other
+    }
+    
+    func displayName(for type: ExpenseType) -> String {
+        let name = customNames[type.rawValue]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let name, !name.isEmpty { return name }
+        return type.rawValue
+    }
+    
+    func setDisplayName(_ type: ExpenseType, name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty || trimmed == type.rawValue {
+            customNames.removeValue(forKey: type.rawValue)
+        } else {
+            customNames[type.rawValue] = trimmed
+        }
+        objectWillChange.send()
+        save()
+    }
+    
+    func move(from source: IndexSet, to destination: Int) {
+        var order = orderedTypes
+        order.move(fromOffsets: source, toOffset: destination)
+        orderedRawValues = order.map(\.rawValue)
+        objectWillChange.send()
+        save()
+    }
+    
+    func moveUp(_ type: ExpenseType) {
+        guard let idx = orderedTypes.firstIndex(of: type), idx > 0 else { return }
+        var order = orderedTypes
+        order.swapAt(idx, idx - 1)
+        orderedRawValues = order.map(\.rawValue)
+        objectWillChange.send()
+        save()
+    }
+    
+    func moveDown(_ type: ExpenseType) {
+        guard let idx = orderedTypes.firstIndex(of: type), idx < orderedTypes.count - 1 else { return }
+        var order = orderedTypes
+        order.swapAt(idx, idx + 1)
+        orderedRawValues = order.map(\.rawValue)
+        objectWillChange.send()
+        save()
+    }
+    
+    func resetToDefaults() {
+        customNames = [:]
+        orderedRawValues = ExpenseType.allCases.map(\.rawValue)
+        objectWillChange.send()
+        save()
+    }
+    
+    private func load() {
+        if let data = UserDefaults.standard.data(forKey: namesKey),
+           let dict = try? JSONDecoder().decode([String: String].self, from: data) {
+            customNames = dict
+        }
+        if let arr = UserDefaults.standard.stringArray(forKey: orderKey), !arr.isEmpty {
+            orderedRawValues = arr
+        }
+    }
+    
+    private func save() {
+        if let data = try? JSONEncoder().encode(customNames) {
+            UserDefaults.standard.set(data, forKey: namesKey)
+        }
+        UserDefaults.standard.set(orderedRawValues, forKey: orderKey)
     }
 }
 

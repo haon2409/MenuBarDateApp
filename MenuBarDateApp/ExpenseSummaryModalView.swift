@@ -75,7 +75,7 @@ struct ExpenseSummaryModalView: View {
                                     .fill(item.type.color)
                                     .frame(width: 8, height: 8)
                                 
-                                Text(item.type.rawValue)
+                                Text(item.type.displayName)
                                     .font(.system(size: 12))
                                     .foregroundColor(.white)
                                     .lineLimit(1)
